@@ -52,3 +52,11 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+/.vs/MesDatas/CopilotIndices/17.14.1518.61961
+/.vs/MesDatas/v17
+/.vs/MesDatas/v16
+/.vs/MesDatas/FileContentIndex
+/.vs/MesDatas/copilot-chat/dc14b76b/sessions
+/packages
+*.user
+/MesDatas/.vs
