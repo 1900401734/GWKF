@@ -146,8 +146,9 @@ namespace MesDatas.Views
 
         private void Form1_FormClosed(object sender, FormClosedEventArgs e)
         {
-            if (plcConnectObject != null)
-                plcConnectObject.ConnectClose();
+            //if (plcConnectObject != null)
+            //    plcConnectObject.ConnectClose();
+            _plcManager?.Close();
 
             // 取消任务
             permanentTaskCts.Cancel();
@@ -200,6 +201,20 @@ namespace MesDatas.Views
             resources = new ResourceManager("MesDatas.Language_Resources.language_Chinese", assembly);
             PlcAddressServer.InitTable();
             plcAddressInfo = PlcAddressServer.GetPlcAddressInfo(1);
+            _plcManager = new PlcConnectionManager(plcAddressInfo);
+
+            // 订阅事件更新 UI (注意线程安全)
+            _plcManager.OnConnectionStatusChanged += (isConnected) => 
+            {
+                this.Invoke((Action)(() => 
+                {
+                    isPlcConnected = isConnected; // 如果你还保留这个字段用于兼容旧代码
+                    PlcSignalLight.ForeColor = isConnected ? Color.Green : Color.Red;
+            
+                    // 重要：同步更新 _readWriteNet 引用，以便 Form1 其他地方的代码能继续工作
+                    _readWriteNet = _plcManager.ReadWriteNet; 
+                }));
+            };
 
             DataTable database = sourceMdb.Find("SELECT database_name FROM SystemDataBase where id=1");
             Global.Instance.DataBase = database.Rows[0]["database_name"].ToString();
@@ -443,7 +458,7 @@ namespace MesDatas.Views
         private void UiUpdateTimer_Tick(object sender, EventArgs e)
         {
             // 更新 PLC 状态
-            PlcSignalLight.ForeColor = isPlcConnected ? Color.Green : Color.Red;
+            //PlcSignalLight.ForeColor = isPlcConnected ? Color.Green : Color.Red;
 
             // 更新MES接口状态
             InterfaceSignalLight.ForeColor = isDeviceAlive ? Color.Green : Color.Red;
@@ -586,8 +601,9 @@ namespace MesDatas.Views
 
             _allDynamicTaskList = new List<Task>(); // 将线程池清空
 
-            if (plcConnectObject != null)
-                plcConnectObject.ConnectClose();    // 断开plc连接
+            //if (plcConnectObject != null)
+            //    plcConnectObject.ConnectClose();    // 断开plc连接
+            _plcManager.Close();
         }
 
         /// <summary>
@@ -595,11 +611,15 @@ namespace MesDatas.Views
         /// </summary>
         private void StartPermanentTask()
         {
+            var ip = CallUiSafely.GetControlPropertyValueSafely(PlcIP, c => c.Text);
+            var port = CallUiSafely.GetControlPropertyValueSafely(PlcPort, c => int.Parse(c.Text));
+            var type = CallUiSafely.GetControlPropertyValueSafely(PlcConnectType, c => c.Text);
+
             // 启用接口心跳
             Task.Factory.StartNew(async () => await InterfaceHeatBeat(), TaskCreationOptions.LongRunning);
 
             // PLC连接与心跳管理
-            Task.Factory.StartNew(async () => await ManagePlcConnectionAsync(), TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(async () => await _plcManager.StartConnectionTaskAsync(ip, port, type, permanentTaskCts.Token), TaskCreationOptions.LongRunning);
 
             // 读取复位信号
             Task.Factory.StartNew(async () => await Recovery(), TaskCreationOptions.LongRunning);
@@ -634,189 +654,10 @@ namespace MesDatas.Views
 
         #region ---------- PLC连接、心跳检测 ----------
 
+        private PlcConnectionManager _plcManager;
         private bool isPlcConnected;                // 全局连接标志
-        private dynamic plcConnectObject;           // 当前plc连接对象
         private static IReadWriteNet _readWriteNet; // 当前plc连接对象
         private delegate Task ComponentExcuteFunction();
-
-        /// <summary>
-        /// 管理PLC连接与心跳
-        /// <para>1. 如果未连接，循环尝试连接。</para>
-        /// <para>2. 如果已连接，执行双向心跳检查。</para>
-        /// 3. 任何读/写失败、异常或“卡住”都会认为断线，并返回步骤1。
-        /// </summary>
-        private async Task ManagePlcConnectionAsync()
-        {
-            int failCount = 0;          // PLC心跳“卡住”的计数器
-            int lastReadValue = -1;     // PLC心跳上一次的值
-            short lastWriteValue = 0;   // PC心跳上一次的值
-            const int failCountMax = 100;
-
-            string ipAddress = CallUiSafely.GetControlPropertyValueSafely(PlcIP, c => c.Text);
-            int port = CallUiSafely.GetControlPropertyValueSafely(PlcPort, c => int.Parse(c.Text));
-            string connectionMethod = CallUiSafely.GetControlPropertyValueSafely(PlcConnectType, c => c.Text);
-
-            while (!permanentTaskCts.IsCancellationRequested)
-            {
-                try
-                {
-                    // --- 步骤 1: 如果未连接 ---
-                    if (!isPlcConnected)
-                    {
-                        if (await TryConnectPlcAsync(ipAddress, port, connectionMethod))
-                        {
-                            isPlcConnected = true;
-
-                            failCount = 0;
-                            lastReadValue = -1;
-                            lastWriteValue = 0;
-                        }
-                        else
-                        {
-                            // 2秒后重试连接
-                            await Task.Delay(2000);
-                            continue;
-                        }
-                    }
-
-                    // --- 步骤 2: 如果已连接，执行双向心跳检查 ---
-
-                    // 2a. 写入PC心跳（带超时）
-                    short valueToWrite = (short)(lastWriteValue == 1 ? 0 : 1);
-                    Task<OperateResult> writeTask = _readWriteNet.WriteAsync(plcAddressInfo.PcHeartBeat, valueToWrite);
-                    var delayTask = Task.Delay(500);
-                    var completedTask = await Task.WhenAny(writeTask, delayTask);
-
-                    if (delayTask == completedTask)
-                    {
-                        // 写入超时，断线
-                        isPlcConnected = false;
-                        continue;
-                    }
-
-                    var writeResult = await writeTask;
-                    if (!writeResult.IsSuccess || writeTask.IsFaulted)
-                    {
-                        // 写入失败或异常，断线
-                        isPlcConnected = false;
-                        continue;
-                    }
-
-                    lastWriteValue = valueToWrite;  // 写入成功后更新lastWriteValue
-
-                    // 2b. 读取PLC心跳
-                    var result = await TryReadInt16Async(plcAddressInfo.PlcHeartBeat);
-                    if (!result.isReadOk)
-                    {
-                        // 读取失败，断线
-                        isPlcConnected = false;
-                        continue;
-                    }
-
-                    // 2c. 检查PLC心跳是否"卡住"
-                    int plcHeartValue = result.value;
-                    if (plcHeartValue == lastReadValue && lastReadValue != -1)
-                    {
-                        failCount++;
-                    }
-                    else
-                    {
-                        failCount = 0;
-                        lastReadValue = plcHeartValue;
-                    }
-
-                    if (failCount >= failCountMax)
-                    {
-                        // 心跳“卡住”超过阈值，断线
-                        isPlcConnected = false;
-                        continue;
-                    }
-
-                    await Task.Delay(1000);
-                }
-                catch
-                {
-                    isPlcConnected = false;
-                    await Task.Delay(1000);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Try to create PLC connection asynchronously.
-        /// </summary>
-        /// <returns>True if connect successfully, else return False.</returns>
-        private async Task<bool> TryConnectPlcAsync(string ipAddress, int port, string connectionMethod)
-        {
-            // Bug fixed:只需要断开连接，不需要将相关对象置null
-            plcConnectObject?.ConnectClose();
-            plcConnectObject = null;
-            //readWriteNet = null;
-
-            try
-            {
-                NetworkDeviceBase networkDeviceBase;
-
-                switch (connectionMethod)
-                {
-                    case "TCP":
-                        var omronFinsNet = new OmronFinsNet(ipAddress, port);
-                        omronFinsNet.ConnectTimeOut = 1000;
-                        omronFinsNet.DA2 = 0;
-                        omronFinsNet.ByteTransform.DataFormat = (DataFormat)2;
-                        networkDeviceBase = omronFinsNet;
-                        break;
-                    case "UDP":
-                        var omronFinsUdp = new OmronFinsUdp(ipAddress, port)
-                        {
-                            SA1 = 192,
-                            ReceiveTimeout = 1000,
-                            ByteTransform =
-                            {
-                                DataFormat = (DataFormat)2
-                            }
-                        };
-                        _readWriteNet = omronFinsUdp;
-                        plcConnectObject = omronFinsUdp;
-                        return true;
-                    case "MC":
-                        networkDeviceBase = new MelsecMcNet(ipAddress, port);
-                        break;
-                    case "Modbus":
-                        networkDeviceBase = new ModbusTcpNet(ipAddress, port);
-                        break;
-                    default:
-                        return false;
-                }
-
-                networkDeviceBase.ReceiveTimeOut = 3000;
-                networkDeviceBase.ConnectTimeOut = 3000;
-
-                var connectTask = networkDeviceBase.ConnectServerAsync();
-                var completedTask = await Task.WhenAny(connectTask, Task.Delay(5000));
-
-                if (completedTask != connectTask)
-                {
-                    // 连接超时
-                    return false;
-                }
-
-                var connect = await connectTask;
-
-                if (connect.IsSuccess && connect.ErrorCode >= 0)
-                {
-                    _readWriteNet = networkDeviceBase;
-                    plcConnectObject = networkDeviceBase;
-                    return true;
-                }
-
-                return false;
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-        }
 
         /// <summary>
         /// 手动连接
@@ -848,9 +689,14 @@ namespace MesDatas.Views
                 // 通知所有线程退出
                 SetDynamicTaskExit();
 
-                bool status = await TryConnectPlcAsync(ip, port, connectMethod);
+                // 尝试连接
+                bool status = await _plcManager.TryConnectPlcAsync(ip, port, connectMethod);
                 if (status)
                 {
+                    // 更新本地引用
+                    _readWriteNet = _plcManager.ReadWriteNet;
+                    isPlcConnected = true; // 兼容旧逻辑
+
                     // 通知所有线程启用
                     SetDynamicTaskStart();
 
@@ -3161,7 +3007,7 @@ namespace MesDatas.Views
                     Thread.Sleep(5);
                 }
 
-                //等待所有任务结束
+                // 等待所有任务结束
                 Task.WaitAll(uploadTask.ToArray());
 
                 string[] ftpPaths = uploadTask.Select(x => x.Result).ToArray();
@@ -3170,7 +3016,8 @@ namespace MesDatas.Views
                     writeLog.WriteLogToComponent(rtbErrorLog, "没有检测到任何图片");
                     return false;
                 }
-                //查看所有任务的返回值，如果有null则说明有图片上传失败
+
+                // 查看所有任务的返回值，如果有null则说明有图片上传失败
                 if (ftpPaths.Contains(null))
                 {
                     writeLog.WriteLogToComponent(rtbErrorLog, "上传单张图片至MES失败");
@@ -3755,7 +3602,7 @@ namespace MesDatas.Views
         /// </returns>
         private async Task<(bool isReadOk, short value)> TryReadInt16Async(string address)
         {
-            for (int i = 0; i < 3; i++)
+            for (var i = 0; i < 3; i++)
             {
                 var readTask = _readWriteNet.ReadInt16Async(address);
                 var completedTask = await Task.WhenAny(readTask, Task.Delay(500));
@@ -3767,15 +3614,9 @@ namespace MesDatas.Views
                 }
 
                 var result = await readTask;
+                if (result.IsSuccess && result.ErrorCode >= 0) return (true, result.Content);
 
-                if (!result.IsSuccess || result.ErrorCode < 0)
-                {
-                    // 读取失败或通信失败，进行下一次重试
-                    await Task.Delay(50);
-                    continue;
-                }
-
-                return (true, result.Content);
+                await Task.Delay(50);
             }
 
             // 循环3次后仍然失败

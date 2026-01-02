@@ -12,7 +12,7 @@ namespace MesDatas.DataAcess
     public class PlcAddressInfo
     {
         [SugarColumn(ColumnName = "ID", IsPrimaryKey = true, IsIdentity = true)]
-        public int ID { get; set; }
+        public int ID { get; private set; }
 
         #region 条码验证（10个）
 

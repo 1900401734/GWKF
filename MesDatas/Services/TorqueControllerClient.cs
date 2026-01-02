@@ -11,14 +11,14 @@ namespace MesDatas.Services
     /// </summary>
     public class TorqueData
     {
-        public bool IsOk { get; set; }           // 拧紧结果 (OK/NG)
-        public string TorqueActual { get; set; } // 实际扭力
-        public string TorqueMin { get; set; }    // 扭力下限
-        public string TorqueMax { get; set; }    // 扭力上限
-        public string AngleActual { get; set; }  // 实际角度
-        public int BatchCounter { get; set; }    // 当前是第几颗螺丝 (从1开始)
-        public DateTime TimeStamp { get; set; }
-        public string RawData { get; set; }      // 原始报文
+        public bool IsOk { get; set; }              // 拧紧结果 (OK/NG)
+        public string TorqueActual { get; set; }    // 实际扭力
+        public string TorqueMax { get; set; }       // 扭力上限
+        public string TorqueMin { get; set; }       // 扭力下限
+        public DateTime TimeStamp { get; set; }     // 时间戳
+        public string RawData { get; set; }         // 原始报文
+        // public string AngleActual { get; set; }  // 实际角度
+        // public int BatchCounter { get; set; }    // 当前是第几颗螺丝 (从1开始)
     }
 
     public class TorqueControllerClient
@@ -37,8 +37,8 @@ namespace MesDatas.Services
         public event Action<string> OnLog;
 
         // 配置参数
-        private string _ip;
-        private int _port;
+        private readonly string _ip;
+        private readonly int _port;
 
         public TorqueControllerClient(string ip, int port = 4545)
         {
@@ -138,7 +138,7 @@ namespace MesDatas.Services
                     }
                     else
                     {
-                        await Task.Delay(50);
+                        await Task.Delay(50, token);
                     }
                 }
                 catch (Exception ex)
@@ -178,10 +178,10 @@ namespace MesDatas.Services
                     ParseTorqueData(msg);
                     break;
                 case "9999": // 心跳回应
-                     //OnLog?.Invoke("<< 收到心跳回应");
+                             //OnLog?.Invoke("<< 收到心跳回应");
                     break;
                 default:
-                     OnLog?.Invoke($"<< 未处理消息: {msg}");
+                    OnLog?.Invoke($"<< 未处理消息: {msg}");
                     break;
             }
         }
@@ -214,27 +214,29 @@ namespace MesDatas.Services
                 // 简单校验
                 if (str.Length < 100) return;   // 长度保护
 
-                TorqueData data = new TorqueData();
-                data.RawData = str;
-                data.TimeStamp = DateTime.Now;
+                var data = new TorqueData
+                {
+                    RawData = str,
+                    TimeStamp = DateTime.Now
+                };
 
                 // 解析结果
                 string status = GetSubString(str, 20 + 87, 1);
-                data.IsOk = (status == "1");
-
-                // 解析批次计数 (第几颗螺丝)
-                string batchCnt = GetSubString(str, 20 + 82, 4);
-                int.TryParse(batchCnt, out int bc);
-                data.BatchCounter = bc;
+                data.IsOk = status == "1";
 
                 // 解析扭力 (除以100)
                 data.TorqueActual = GetSubString(str, 20 + 120, 6).Trim();
                 data.TorqueMin = GetSubString(str, 20 + 96, 6).Trim();
                 data.TorqueMax = GetSubString(str, 20 + 104, 6).Trim();
 
+                // 解析批次计数 (第几颗螺丝)
+                /*string batchCnt = GetSubString(str, 20 + 82, 4);
+                int.TryParse(batchCnt, out int bc);
+                data.BatchCounter = bc;*/
+
                 // 解析角度 (不除)
-                data.AngleActual = GetSubString(str, 20 + 150, 5).TrimStart('0');
-                if (string.IsNullOrEmpty(data.AngleActual)) data.AngleActual = "0";
+                /*data.AngleActual = GetSubString(str, 20 + 150, 5).TrimStart('0');
+                if (string.IsNullOrEmpty(data.AngleActual)) data.AngleActual = "0";*/
 
                 OnTorqueDataReceived?.Invoke(data);
             }

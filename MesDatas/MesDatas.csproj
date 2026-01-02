@@ -242,6 +242,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Services\PlcConnectionManager.cs" />
     <Compile Include="Utility\CallUiSafely.cs" />
     <Compile Include="Utility\CsvHelper.cs" />
     <Compile Include="Utility\GridViewManager.cs.cs" />
