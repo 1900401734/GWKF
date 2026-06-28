@@ -358,19 +358,19 @@ namespace MesDatas.DataAcess
 
         /// <summary>
         /// D7627,Int16 扭力控制器就绪互锁1
-        /// <para>1=允许打螺钉，0=禁止打螺钉</para>
+        /// <para>1=允许打螺钉，2=禁止打螺钉；PLC重启后的0视为未初始化态。</para>
         /// </summary>
         [SugarColumn(ColumnName = "TorqueReady1", IsNullable = true)]
         public string TorqueReady1 { get; set; } = "D7627";
 
         /// <summary>
-        /// 
+        /// PC扭力转发成功后置1，待PLC接收成功后清零
         /// </summary>
         [SugarColumn(ColumnName = "Request1", IsNullable = true)]
         public string Request1 { get; set; } = "D7628";
 
         /// <summary>
-        /// 
+        /// PLC扭力接收成功置1，待PC将转发成功信号置零后同步置零。
         /// </summary>
         [SugarColumn(ColumnName = "Acknowledge1", IsNullable = true)]
         public string Acknowledge1 { get; set; } = "D7629";
@@ -403,19 +403,19 @@ namespace MesDatas.DataAcess
 
         /// <summary>
         /// D7637,Int16 扭力控制器就绪互锁3
-        /// <para>1=允许打螺钉，0=禁止打螺钉</para>
+        /// <para>1=允许打螺钉，2=禁止打螺钉；PLC重启后的0视为未初始化态。</para>
         /// </summary>
         [SugarColumn(ColumnName = "TorqueReady3", IsNullable = true)]
         public string TorqueReady3 { get; set; } = "D7637";
 
         /// <summary>
-        /// 
+        /// PC扭力转发成功
         /// </summary>
         [SugarColumn(ColumnName = "Request3", IsNullable = true)]
         public string Request3 { get; set; } = "D7638";
 
         /// <summary>
-        /// 
+        /// PLC扭力接收成功
         /// </summary>
         [SugarColumn(ColumnName = "Acknowledge3", IsNullable = true)]
         public string Acknowledge3 { get; set; } = "D7639";

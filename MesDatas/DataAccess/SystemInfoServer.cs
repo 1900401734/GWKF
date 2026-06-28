@@ -4,11 +4,16 @@ using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using SqlSugar;
 
 namespace MesDatas.DataAcess
 {
     public class SystemInfoServer
     {
+        private const string SystemInfoTableName = "SystemInfo";
+        private const string MesSaveResultTimeoutColumnName = "MesSaveResultTimeoutSeconds";
+        private const string TorqueAckTimeoutModeColumnName = "TorqueAckTimeoutMode";
+
         // 初始化表格
         public static void InitTable()
         {
@@ -17,6 +22,8 @@ namespace MesDatas.DataAcess
                 using (var db = DBConnSugClie.GetDBConnection())
                 {
                     db.CodeFirst.InitTables<SystemInfo>();
+                    EnsureMesSaveResultTimeoutColumn(db);
+                    EnsureTorqueAckTimeoutModeColumn(db);
 
                     SystemInfo plcInfo = SystemInfo.Initalize();
                     if (!db.Queryable<SystemInfo>().Where(it => it.ID == plcInfo.ID).Any())
@@ -28,6 +35,41 @@ namespace MesDatas.DataAcess
             catch (Exception)
             {
 
+            }
+        }
+
+        /// <summary>
+        /// 兼容现场旧版 Access 数据库，确保 MES 过站超时字段存在。
+        /// <para>CodeFirst 对旧 Access 表结构的升级不一定稳定，所以这里做一次显式兜底。</para>
+        /// </summary>
+        private static void EnsureMesSaveResultTimeoutColumn(SqlSugarClient db)
+        {
+            try
+            {
+                if (db.DbMaintenance.IsAnyColumn(SystemInfoTableName, MesSaveResultTimeoutColumnName, false)) return;
+
+                db.Ado.ExecuteCommand($"ALTER TABLE {SystemInfoTableName} ADD COLUMN {MesSaveResultTimeoutColumnName} TEXT(20)");
+            }
+            catch
+            {
+                // 字段已存在或现场数据库不支持结构变更时不阻断启动，后续保存仍会返回明确失败。
+            }
+        }
+
+        /// <summary>
+        /// 兼容现场旧版 Access 数据库，确保扭力 ACK 超时处理模式字段存在。
+        /// </summary>
+        private static void EnsureTorqueAckTimeoutModeColumn(SqlSugarClient db)
+        {
+            try
+            {
+                if (db.DbMaintenance.IsAnyColumn(SystemInfoTableName, TorqueAckTimeoutModeColumnName, false)) return;
+
+                db.Ado.ExecuteCommand($"ALTER TABLE {SystemInfoTableName} ADD COLUMN {TorqueAckTimeoutModeColumnName} TEXT(50)");
+            }
+            catch
+            {
+                // 字段已存在或现场数据库不支持结构变更时不阻断启动，使用程序默认值继续运行。
             }
         }
 

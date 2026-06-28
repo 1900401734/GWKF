@@ -6,9 +6,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using System.Xml.XPath;
@@ -79,6 +82,11 @@ namespace MesDatas.Utility
         #region 静态 HttpClient 单例及全局网络优化
         // 【核心优化1】HttpClient 必须作为静态单例使用，自带连接池，避免端口耗尽
         private static readonly HttpClient _httpClient;
+        private const int DefaultRequestTimeoutSeconds = 15;
+        public const int DefaultSaveResultTimeoutSeconds = 30;
+        private const int MinSaveResultTimeoutSeconds = 5;
+        private const int MaxSaveResultTimeoutSeconds = 300;
+        private static int _saveResultTimeoutSeconds = DefaultSaveResultTimeoutSeconds;
 
         static HttpClientUtil()
         {
@@ -98,7 +106,7 @@ namespace MesDatas.Utility
 
             _httpClient = new HttpClient(handler)
             {
-                Timeout = TimeSpan.FromSeconds(15) // 设置合理超时时间
+                Timeout = TimeSpan.FromMinutes(10) // 真实超时由单次请求CTS控制，这里只做兜底上限
             };
             _httpClient.DefaultRequestHeaders.ConnectionClose = false; // 启用 Keep-Alive 复用连接
         }
@@ -144,6 +152,34 @@ namespace MesDatas.Utility
             this.fileType = fileType;
         }
 
+        /// <summary>
+        /// 配置 SAVERESULT 接口超时时间。
+        /// <para>生产配置保存后会调用这里，让运行中的 MES 请求使用用户设置。</para>
+        /// </summary>
+        public static void ConfigureSaveResultTimeoutSeconds(string timeoutSecondsText)
+        {
+            if (!int.TryParse(timeoutSecondsText, out int timeoutSeconds))
+                timeoutSeconds = DefaultSaveResultTimeoutSeconds;
+
+            ConfigureSaveResultTimeoutSeconds(timeoutSeconds);
+        }
+
+        /// <summary>
+        /// 配置 SAVERESULT 接口超时时间。
+        /// </summary>
+        public static void ConfigureSaveResultTimeoutSeconds(int timeoutSeconds)
+        {
+            Interlocked.Exchange(ref _saveResultTimeoutSeconds, NormalizeSaveResultTimeoutSeconds(timeoutSeconds));
+        }
+
+        /// <summary>
+        /// 获取当前 SAVERESULT 接口超时时间。
+        /// </summary>
+        public static int GetSaveResultTimeoutSeconds()
+        {
+            return NormalizeSaveResultTimeoutSeconds(Interlocked.CompareExchange(ref _saveResultTimeoutSeconds, 0, 0));
+        }
+
         public JObject GetResponse(string url, string function, JObject inputParameterJson, string logFile, string responseSelectJsonPath = "//MesServiceJsonResult", int getTokenCount = 0)
         {
             // 【优化3】如果 Token 过期了，主动先获取 Token，避免一次无谓的失败请求
@@ -155,7 +191,20 @@ namespace MesDatas.Utility
                 LogProductPassMesDetail($"MES Token检查/刷新耗时={tokenWatch.ElapsedMilliseconds}ms，logFile={logFile}");
             }
 
-            JObject jsonObject = _GetResponse(url, function, inputParameterJson, logFile, responseSelectJsonPath: responseSelectJsonPath);
+            if (!string.IsNullOrWhiteSpace(function) && string.IsNullOrWhiteSpace(token))
+            {
+                Log4netHelper.LogMesInteraction("TOKEN_REFRESH_FAIL", "Token获取失败，业务请求未发送", new Dictionary<string, object>
+                {
+                    { "function", function },
+                    { "url", url },
+                    { "errorType", "TOKEN_REFRESH_FAIL" }
+                }, level: "ERROR");
+                return null;
+            }
+
+            // SAVERESULT 是写入型接口。这里不能自动重试，否则“MES已写库但响应丢失”时会重复插入。
+            JObject jsonObject = _GetResponse(url, function, inputParameterJson, logFile, responseSelectJsonPath: responseSelectJsonPath, retryCount: 0);
+
             if (jsonObject is null) return null;
 
             if (jsonObject["ErrorCode"]?.ToString() == "10001" && getTokenCount < 3)
@@ -177,15 +226,18 @@ namespace MesDatas.Utility
         /// <summary>
         /// 发起请求并获得请求的结果 (使用 HttpClient 替代 HttpWebRequest)
         /// </summary>
-        private JObject _GetResponse(string url, string function, JObject inputParameterJson, string logFile, string responseSelectJsonPath = "//MesServiceJsonResult", bool getToken = false)
+        private JObject _GetResponse(string url, string function, JObject inputParameterJson, string logFile, string responseSelectJsonPath = "//MesServiceJsonResult", bool getToken = false, int retryCount = 0)
         {
             string timeFormat = "yyyy-MM-dd HH:mm:ss.fff"; // 增加毫秒级记录
-            string log = "时间:{0}  url地址:{1}  类型:{2}  数据:{3}";
 
             // 生成 XML 请求体
             string requestXml = GenerateXml(inputParameterJson, function, !getToken, this.token ?? "未获取到token");
+            int timeoutSeconds = IsSaveResultFunction(function) ? GetSaveResultTimeoutSeconds() : DefaultRequestTimeoutSeconds;
+            MesLogContext logContext = ExtractMesLogContext(url, function, inputParameterJson, requestXml, retryCount);
 
             string sendTime = DateTime.Now.ToString(timeFormat);
+            logContext.SendTime = sendTime;
+            WriteMesRequestLog(logContext, requestXml);
             Stopwatch totalWatch = Stopwatch.StartNew();
 
             try
@@ -195,51 +247,382 @@ namespace MesDatas.Utility
                 {
                     // 使用 GetAwaiter().GetResult() 来同步等待异步结果，兼容现有老代码架构
                     Stopwatch postWatch = Stopwatch.StartNew();
-                    HttpResponseMessage response = _httpClient.PostAsync(url, content).GetAwaiter().GetResult();
-                    postWatch.Stop();
+                    using (var requestCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+                    {
+                        HttpResponseMessage response = _httpClient.PostAsync(url, content, requestCts.Token).GetAwaiter().GetResult();
+                        postWatch.Stop();
 
-                    string receiveTime = DateTime.Now.ToString(timeFormat);
+                        string receiveTime = DateTime.Now.ToString(timeFormat);
 
-                    // 读取返回的字符串结果
-                    Stopwatch readWatch = Stopwatch.StartNew();
-                    string recvXml = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                    readWatch.Stop();
+                        // 读取返回的字符串结果
+                        Stopwatch readWatch = Stopwatch.StartNew();
+                        string recvXml = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                        readWatch.Stop();
 
-                    // 解析为 JObject
-                    Stopwatch parseWatch = Stopwatch.StartNew();
-                    JObject jsonObject = _FromXmlGetJObject(recvXml, responseSelectJsonPath);
-                    parseWatch.Stop();
-                    totalWatch.Stop();
+                        // 解析为 JObject
+                        Stopwatch parseWatch = Stopwatch.StartNew();
+                        JObject jsonObject = _FromXmlGetJObject(recvXml, responseSelectJsonPath);
+                        parseWatch.Stop();
+                        totalWatch.Stop();
 
-                    // 记录日志 (调用你原有的工具类)
-                    Log4netHelper.Info(string.Format(log, sendTime, url, "发送", requestXml));
-                    Log4netHelper.Info(string.Format(log, receiveTime, url, "接收", recvXml));
-                    LogProductPassMesDetail(
-                        $"MES请求明细 Function={function} Url={url} 发送时间={sendTime} 返回时间={receiveTime} " +
-                        $"HTTP耗时={postWatch.ElapsedMilliseconds}ms 响应读取耗时={readWatch.ElapsedMilliseconds}ms " +
-                        $"XML解析耗时={parseWatch.ElapsedMilliseconds}ms 总耗时={totalWatch.ElapsedMilliseconds}ms");
+                        logContext.ReceiveTime = receiveTime;
+                        logContext.ElapsedMs = totalWatch.ElapsedMilliseconds;
+                        logContext.HttpStatusCode = ((int)response.StatusCode).ToString();
+                        logContext.Result = jsonObject?["Result"]?.ToString();
+                        logContext.ErrorCode = jsonObject?["ErrorCode"]?.ToString();
+                        logContext.ErrorMessage = jsonObject?["ErrorMessage"]?.ToString();
+                        WriteMesResponseLog(logContext, recvXml, jsonObject);
 
-                    return jsonObject;
+                        LogProductPassMesDetail(
+                            $"MES请求明细 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} 发送时间={sendTime} 返回时间={receiveTime} " +
+                            $"HTTP耗时={postWatch.ElapsedMilliseconds}ms 响应读取耗时={readWatch.ElapsedMilliseconds}ms " +
+                            $"XML解析耗时={parseWatch.ElapsedMilliseconds}ms 总耗时={totalWatch.ElapsedMilliseconds}ms");
+
+                        return jsonObject;
+                    }
                 }
             }
             catch (Exception ex)
             {
                 totalWatch.Stop();
-                Log4netHelper.Info(string.Format(log, sendTime, url, "无法访问", requestXml + "\r\n异常信息:" + ex.Message));
-                LogProductPassMesDetail($"MES请求异常 Function={function} Url={url} 总耗时={totalWatch.ElapsedMilliseconds}ms 异常={ex.Message}");
+                string errorType = ClassifyMesException(ex);
+                logContext.ElapsedMs = totalWatch.ElapsedMilliseconds;
+                logContext.TimeoutMs = timeoutSeconds * 1000;
+                logContext.ErrorType = errorType;
+                logContext.ErrorMessage = ex.Message;
+                WriteMesExceptionLog(logContext, requestXml, ex);
+                LogProductPassMesDetail($"MES请求异常 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} ErrorType={errorType} Retry={retryCount} 总耗时={totalWatch.ElapsedMilliseconds}ms 异常={ex.Message}");
                 return null;
             }
         }
 
+        private static bool IsSaveResultFunction(string function)
+        {
+            return string.Equals(function, "SAVERESULT", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int NormalizeSaveResultTimeoutSeconds(int timeoutSeconds)
+        {
+            if (timeoutSeconds < MinSaveResultTimeoutSeconds) return MinSaveResultTimeoutSeconds;
+            if (timeoutSeconds > MaxSaveResultTimeoutSeconds) return MaxSaveResultTimeoutSeconds;
+            return timeoutSeconds;
+        }
+
+        private static string ClassifyMesException(Exception ex)
+        {
+            if (ex is TaskCanceledException) return "TIMEOUT";
+
+            string detail = ex.ToString();
+            if (detail.IndexOf("remote name could not be resolved", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "DNS_ERROR";
+            if (detail.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "TIMEOUT";
+            if (ex is HttpRequestException || detail.IndexOf("WebException", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "CONNECT_ERROR";
+            if (ex is JsonException || detail.IndexOf("XmlException", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "PARSE_ERROR";
+
+            return "REQUEST_EXCEPTION";
+        }
+
+        /// <summary>
+        /// 写入 MES 请求块。原始报文在块内完整保留，方便按 RequestId 对照响应。
+        /// </summary>
+        private static void WriteMesRequestLog(MesLogContext context, string requestXml)
+        {
+            SafeWriteMesInteractionBlock(BuildMesInteractionBlock("请求", context, requestXml, null, null));
+        }
+
+        /// <summary>
+        /// 写入 MES 响应块。
+        /// </summary>
+        private static void WriteMesResponseLog(MesLogContext context, string responseXml, JObject responseJson)
+        {
+            SafeWriteMesInteractionBlock(BuildMesInteractionBlock("响应", context, responseXml, responseJson, null));
+        }
+
+        /// <summary>
+        /// 写入 MES 异常块。
+        /// </summary>
+        private static void WriteMesExceptionLog(MesLogContext context, string requestXml, Exception exception)
+        {
+            SafeWriteMesInteractionBlock(BuildMesInteractionBlock("异常", context, requestXml, null, exception), "ERROR", exception);
+        }
+
+        /// <summary>
+        /// 生成 MES 交互日志块。
+        /// <para>块内同时包含原始报文和格式化报文；原始报文不做任何清理、截断或替换。</para>
+        /// </summary>
+        private static string BuildMesInteractionBlock(string direction, MesLogContext context, string rawXml, JObject responseJson, Exception exception)
+        {
+            string formatError;
+            string formattedXml = FormatMesXmlForLog(rawXml, out formatError);
+
+            var builder = new StringBuilder();
+            builder.AppendLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {BuildMesTitle(direction, context)}");
+            builder.AppendLine(BuildMesSummary(context, responseJson, exception));
+            builder.AppendLine("---- 原始报文开始 ----");
+            builder.AppendLine(rawXml ?? string.Empty);
+            builder.AppendLine("---- 原始报文结束 ----");
+            builder.AppendLine(string.IsNullOrWhiteSpace(formatError)
+                ? "---- 格式化报文开始 ----"
+                : $"---- 格式化报文开始（格式化失败原因={formatError}） ----");
+            builder.AppendLine(string.IsNullOrWhiteSpace(formattedXml) ? "格式化失败，原始报文已在上方完整保留。" : formattedXml);
+            builder.AppendLine("---- 格式化报文结束 ----");
+            return builder.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// 格式化 MES XML，并尝试格式化 XML 内部的 JSON 字符串。
+        /// </summary>
+        private static string FormatMesXmlForLog(string rawXml, out string formatError)
+        {
+            formatError = null;
+            if (string.IsNullOrWhiteSpace(rawXml)) return string.Empty;
+
+            try
+            {
+                XDocument document = XDocument.Parse(rawXml);
+                foreach (XElement element in document.Descendants())
+                {
+                    string localName = element.Name.LocalName;
+                    if (!string.Equals(localName, "InputParameter", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(localName, "MesServiceJsonResult", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string formattedJson;
+                    string jsonError;
+                    if (TryFormatEmbeddedJson(element.Value, out formattedJson, out jsonError))
+                        element.Value = Environment.NewLine + formattedJson + Environment.NewLine;
+                }
+
+                return document.ToString();
+            }
+            catch (Exception ex)
+            {
+                formatError = ex.Message;
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 尝试格式化 XML 节点里嵌套的 JSON 内容。
+        /// </summary>
+        private static bool TryFormatEmbeddedJson(string text, out string formattedJson, out string errorMessage)
+        {
+            formattedJson = null;
+            errorMessage = null;
+
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            try
+            {
+                JToken token = JToken.Parse(text);
+                formattedJson = token.ToString(Newtonsoft.Json.Formatting.Indented);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 从请求参数中提取现场检索需要的 MES 日志上下文。
+        /// </summary>
+        private static MesLogContext ExtractMesLogContext(string url, string function, JObject inputParameterJson, string requestXml, int retryCount)
+        {
+            var context = new MesLogContext
+            {
+                RequestId = $"{DateTime.Now:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".Substring(0, 26),
+                TraceId = ProductPassTraceContext.CurrentTraceId,
+                Function = string.IsNullOrWhiteSpace(function) ? "GetAccessTokenJson" : function,
+                Url = url,
+                RetryCount = retryCount,
+                Process = GetJsonText(inputParameterJson, "Process"),
+                Station = GetJsonText(inputParameterJson, "Station"),
+                Device = GetJsonText(inputParameterJson, "Device"),
+                PlanNo = GetJsonText(inputParameterJson, "PlanNo"),
+                BoardSideSN = GetJsonText(inputParameterJson, "BoardSideSN")
+            };
+
+            context.Barcodes = ExtractBarcodeList(inputParameterJson);
+            context.Barcode = context.Barcodes.FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(context.Barcode))
+                context.Barcode = FirstText(context.BoardSideSN, GetJsonText(inputParameterJson, "PrdSN"));
+
+            if (IsSaveResultFunction(function))
+                context.PayloadHash = ComputeSha256(requestXml);
+
+            return context;
+        }
+
+        private static string BuildMesTitle(string direction, MesLogContext context)
+        {
+            string titleName = direction == "请求" ? "MES请求" : direction == "响应" ? "MES响应" : "MES异常";
+            var parts = new List<string>
+            {
+                $"[{titleName}]",
+                $"RequestId={context.RequestId}",
+                $"Function={context.Function}",
+                $"SN={FirstText(context.Barcode, "-")}",
+                $"工序={FirstText(context.Process, "-")}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(context.SendTime))
+                parts.Add($"发送时间={context.SendTime}");
+            if (!string.IsNullOrWhiteSpace(context.ReceiveTime))
+                parts.Add($"接收时间={context.ReceiveTime}");
+            if (context.ElapsedMs >= 0)
+                parts.Add($"耗时={context.ElapsedMs}ms");
+            if (!string.IsNullOrWhiteSpace(context.Result))
+                parts.Add($"Result={context.Result}");
+            if (!string.IsNullOrWhiteSpace(context.ErrorCode))
+                parts.Add($"ErrorCode={context.ErrorCode}");
+            if (!string.IsNullOrWhiteSpace(context.ErrorType))
+                parts.Add($"ErrorType={context.ErrorType}");
+            parts.Add($"Retry={context.RetryCount}");
+            if (!string.IsNullOrWhiteSpace(context.PayloadHash))
+                parts.Add($"PayloadHash={context.PayloadHash}");
+
+            return string.Join(" ", parts);
+        }
+
+        private static string BuildMesSummary(MesLogContext context, JObject responseJson, Exception exception)
+        {
+            var parts = new List<string>
+            {
+                $"TraceId={FirstText(context.TraceId, "-")}",
+                $"Url={FirstText(context.Url, "-")}",
+                $"Process={FirstText(context.Process, "-")}",
+                $"Station={FirstText(context.Station, "-")}",
+                $"Device={FirstText(context.Device, "-")}",
+                $"PlanNo={FirstText(context.PlanNo, "-")}",
+                $"BoardSideSN={FirstText(context.BoardSideSN, "-")}",
+                $"Barcodes={FirstText(string.Join(",", context.Barcodes ?? new List<string>()), "-")}",
+                $"HttpStatus={FirstText(context.HttpStatusCode, "-")}"
+            };
+
+            if (responseJson != null)
+            {
+                parts.Add($"ResponseResult={FirstText(responseJson["Result"]?.ToString(), "-")}");
+                parts.Add($"ResponseErrorCode={FirstText(responseJson["ErrorCode"]?.ToString(), "-")}");
+            }
+
+            if (exception != null)
+            {
+                parts.Add($"ExceptionType={exception.GetType().Name}");
+                parts.Add($"Exception={exception.Message}");
+                if (context.TimeoutMs > 0)
+                    parts.Add($"TimeoutMs={context.TimeoutMs}");
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static void SafeWriteMesInteractionBlock(string block, string level = "INFO", Exception exception = null)
+        {
+            try
+            {
+                Log4netHelper.LogMesInteractionBlock(block, level, exception);
+            }
+            catch
+            {
+                // 日志写入失败不能影响 MES 主业务请求。
+            }
+        }
+
+        private static List<string> ExtractBarcodeList(JObject inputParameterJson)
+        {
+            var result = new List<string>();
+            if (inputParameterJson == null) return result;
+
+            AddJsonTokenValues(result, inputParameterJson.SelectTokens("PrdSNCollection.PrdSNs[*].PrdSN"));
+            AddJsonTokenValues(result, inputParameterJson.SelectTokens("PrdSNCollection.PrdSN[*]"));
+            AddJsonTokenValues(result, inputParameterJson.SelectTokens("PrdSN"));
+
+            return result.Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static void AddJsonTokenValues(List<string> values, IEnumerable<JToken> tokens)
+        {
+            if (values == null || tokens == null) return;
+            foreach (JToken token in tokens)
+            {
+                string text = token?.ToString();
+                if (!string.IsNullOrWhiteSpace(text))
+                    values.Add(text);
+            }
+        }
+
+        private static string GetJsonText(JObject json, string propertyName)
+        {
+            return json?[propertyName]?.ToString() ?? string.Empty;
+        }
+
+        private static string FirstText(params string[] values)
+        {
+            foreach (string value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value)) return value;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ComputeSha256(string text)
+        {
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(text ?? string.Empty);
+                byte[] hash = sha256.ComputeHash(bytes);
+                return BitConverter.ToString(hash).Replace("-", string.Empty);
+            }
+        }
+
+        private sealed class MesLogContext
+        {
+            public string RequestId { get; set; }
+            public string TraceId { get; set; }
+            public string Function { get; set; }
+            public string Url { get; set; }
+            public string SendTime { get; set; }
+            public string ReceiveTime { get; set; }
+            public long ElapsedMs { get; set; } = -1;
+            public int TimeoutMs { get; set; }
+            public int RetryCount { get; set; }
+            public string PayloadHash { get; set; }
+            public string Process { get; set; }
+            public string Station { get; set; }
+            public string Device { get; set; }
+            public string PlanNo { get; set; }
+            public string BoardSideSN { get; set; }
+            public string Barcode { get; set; }
+            public List<string> Barcodes { get; set; } = new List<string>();
+            public string HttpStatusCode { get; set; }
+            public string Result { get; set; }
+            public string ErrorCode { get; set; }
+            public string ErrorType { get; set; }
+            public string ErrorMessage { get; set; }
+        }
+
         /// <summary>
         /// 仅在产品过站链路内记录 MES 明细耗时，避免污染其它业务日志。
+        /// <para>明细归入 MES 交互日志（MesInteraction），保持其自带时间戳的结构化格式；
+        /// 产品过站文件已改为纯文本流程日志，不再承载结构化明细。</para>
         /// </summary>
         private void LogProductPassMesDetail(string message)
         {
             string traceId = ProductPassTraceContext.CurrentTraceId;
             if (string.IsNullOrWhiteSpace(traceId)) return;
 
-            Log4netHelper.LogProductPass($"TraceId={traceId} {message}");
+            Log4netHelper.LogMesInteraction("MES_DETAIL", message, new Dictionary<string, object>
+            {
+                { "traceId", traceId }
+            });
         }
 
         private String GenerateXml(JObject inputParameterJson, string function, bool useHeader = false, string token = null)

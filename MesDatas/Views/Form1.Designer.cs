@@ -123,6 +123,8 @@ namespace MesDatas.Views
             this.tlpProductConfig = new System.Windows.Forms.TableLayoutPanel();
             this.groupBox13 = new System.Windows.Forms.GroupBox();
             this.BarcodeRule = new System.Windows.Forms.TextBox();
+            this.txtMesSaveResultTimeoutSeconds = new System.Windows.Forms.TextBox();
+            this.labelMesSaveResultTimeoutSeconds = new System.Windows.Forms.Label();
             this.label19 = new System.Windows.Forms.Label();
             this.EnableReportConfigParam = new System.Windows.Forms.CheckBox();
             this.EnableReportRealTimeParam = new System.Windows.Forms.CheckBox();
@@ -150,6 +152,15 @@ namespace MesDatas.Views
             this.EnableBarcodeRuleVerify = new System.Windows.Forms.CheckBox();
             this.panel3 = new System.Windows.Forms.Panel();
             this.tableLayoutPanel33 = new System.Windows.Forms.TableLayoutPanel();
+            this.ProductConfig_SaveButton = new System.Windows.Forms.Button();
+            this.grpTorqueMeterConfig = new System.Windows.Forms.GroupBox();
+            this.cboTorqueAckTimeoutMode = new System.Windows.Forms.ComboBox();
+            this.labelTorqueAckTimeoutMode = new System.Windows.Forms.Label();
+            this.btnRefresh = new System.Windows.Forms.Button();
+            this.cmbCOM2 = new System.Windows.Forms.ComboBox();
+            this.lblCOM2 = new System.Windows.Forms.Label();
+            this.cmbCOM1 = new System.Windows.Forms.ComboBox();
+            this.lblCOM1 = new System.Windows.Forms.Label();
             this.grpTorqueConfig = new System.Windows.Forms.GroupBox();
             this.grpTorqueControllerConfig2 = new System.Windows.Forms.GroupBox();
             this.txtControllerPort2 = new System.Windows.Forms.TextBox();
@@ -161,13 +172,6 @@ namespace MesDatas.Views
             this.txtControllerIP1 = new System.Windows.Forms.TextBox();
             this.lblPort1 = new System.Windows.Forms.Label();
             this.lblIP1 = new System.Windows.Forms.Label();
-            this.ProductConfig_SaveButton = new System.Windows.Forms.Button();
-            this.grpTorqueMeterConfig = new System.Windows.Forms.GroupBox();
-            this.btnRefresh = new System.Windows.Forms.Button();
-            this.cmbCOM2 = new System.Windows.Forms.ComboBox();
-            this.lblCOM2 = new System.Windows.Forms.Label();
-            this.cmbCOM1 = new System.Windows.Forms.ComboBox();
-            this.lblCOM1 = new System.Windows.Forms.Label();
             this.groupBox16 = new System.Windows.Forms.GroupBox();
             this.dgvPrintDirectory = new System.Windows.Forms.DataGridView();
             this.printRefresh = new System.Windows.Forms.Button();
@@ -477,7 +481,9 @@ namespace MesDatas.Views
             this.lblStatusErrorTip = new System.Windows.Forms.Label();
             this.TabContorl = new System.Windows.Forms.TabControl();
             this.tabPageTorqueMonitor = new System.Windows.Forms.TabPage();
-            this.label63 = new System.Windows.Forms.Label();
+            this.tlpTorqueMonitor = new System.Windows.Forms.TableLayoutPanel();
+            this.panelASSY = new System.Windows.Forms.Panel();
+            this.rtbASSYLog = new System.Windows.Forms.RichTextBox();
             this.tlpScan_ASSY = new System.Windows.Forms.TableLayoutPanel();
             this.groupBox31 = new System.Windows.Forms.GroupBox();
             this.lblAssyVal = new System.Windows.Forms.Label();
@@ -490,7 +496,11 @@ namespace MesDatas.Views
             this.label132 = new System.Windows.Forms.Label();
             this.label66 = new System.Windows.Forms.Label();
             this.ASSY = new System.Windows.Forms.Label();
-            this.tlpTorqueMonitor = new System.Windows.Forms.TableLayoutPanel();
+            this.panelAS = new System.Windows.Forms.Panel();
+            this.rtbBALog = new System.Windows.Forms.RichTextBox();
+            this.tlpScrew_BA = new System.Windows.Forms.TableLayoutPanel();
+            this.label63 = new System.Windows.Forms.Label();
+            this.BA = new System.Windows.Forms.Label();
             this.groupBox32 = new System.Windows.Forms.GroupBox();
             this.lblBaRes = new System.Windows.Forms.Label();
             this.lblBaMin = new System.Windows.Forms.Label();
@@ -500,13 +510,8 @@ namespace MesDatas.Views
             this.label133 = new System.Windows.Forms.Label();
             this.label136 = new System.Windows.Forms.Label();
             this.label134 = new System.Windows.Forms.Label();
-            this.BA = new System.Windows.Forms.Label();
-            this.rtbBALog = new System.Windows.Forms.RichTextBox();
-            this.rtbASSYLog = new System.Windows.Forms.RichTextBox();
-            this.tlpScrew_BA = new System.Windows.Forms.TableLayoutPanel();
-            this.panelAS = new System.Windows.Forms.Panel();
-            this.panelASSY = new System.Windows.Forms.Panel();
             this.panelTorqueMeter1 = new System.Windows.Forms.Panel();
+            this.rtbTorqueMeter1 = new System.Windows.Forms.RichTextBox();
             this.tlpTorqueMeter1 = new System.Windows.Forms.TableLayoutPanel();
             this.lblTorque1 = new System.Windows.Forms.Label();
             this.lblSerialLight1 = new System.Windows.Forms.Label();
@@ -515,17 +520,16 @@ namespace MesDatas.Views
             this.label140 = new System.Windows.Forms.Label();
             this.label143 = new System.Windows.Forms.Label();
             this.label144 = new System.Windows.Forms.Label();
-            this.rtbTorqueMeter1 = new System.Windows.Forms.RichTextBox();
             this.panelTorqueMonitor2 = new System.Windows.Forms.Panel();
+            this.rtbTorqueMeter2 = new System.Windows.Forms.RichTextBox();
             this.tlpTorqueMeter2 = new System.Windows.Forms.TableLayoutPanel();
             this.lblTorque2 = new System.Windows.Forms.Label();
             this.lblSerialLight2 = new System.Windows.Forms.Label();
             this.grpTorqueMonitor2 = new System.Windows.Forms.GroupBox();
-            this.label11 = new System.Windows.Forms.Label();
-            this.label137 = new System.Windows.Forms.Label();
             this.label139 = new System.Windows.Forms.Label();
             this.label141 = new System.Windows.Forms.Label();
-            this.rtbTorqueMeter2 = new System.Windows.Forms.RichTextBox();
+            this.label137 = new System.Windows.Forms.Label();
+            this.label11 = new System.Windows.Forms.Label();
             this.tabPage9.SuspendLayout();
             this.tableLayoutPanel13.SuspendLayout();
             this.groupBox23.SuspendLayout();
@@ -561,10 +565,10 @@ namespace MesDatas.Views
             this.groupBox12.SuspendLayout();
             this.panel3.SuspendLayout();
             this.tableLayoutPanel33.SuspendLayout();
+            this.grpTorqueMeterConfig.SuspendLayout();
             this.grpTorqueConfig.SuspendLayout();
             this.grpTorqueControllerConfig2.SuspendLayout();
             this.grpTorqueControllerConfig1.SuspendLayout();
-            this.grpTorqueMeterConfig.SuspendLayout();
             this.groupBox16.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvPrintDirectory)).BeginInit();
             this.tabPage11.SuspendLayout();
@@ -638,13 +642,13 @@ namespace MesDatas.Views
             this.tableLayoutPanel17.SuspendLayout();
             this.TabContorl.SuspendLayout();
             this.tabPageTorqueMonitor.SuspendLayout();
+            this.tlpTorqueMonitor.SuspendLayout();
+            this.panelASSY.SuspendLayout();
             this.tlpScan_ASSY.SuspendLayout();
             this.groupBox31.SuspendLayout();
-            this.tlpTorqueMonitor.SuspendLayout();
-            this.groupBox32.SuspendLayout();
-            this.tlpScrew_BA.SuspendLayout();
             this.panelAS.SuspendLayout();
-            this.panelASSY.SuspendLayout();
+            this.tlpScrew_BA.SuspendLayout();
+            this.groupBox32.SuspendLayout();
             this.panelTorqueMeter1.SuspendLayout();
             this.tlpTorqueMeter1.SuspendLayout();
             this.grpTorqueMeter1.SuspendLayout();
@@ -1678,6 +1682,8 @@ namespace MesDatas.Views
             // groupBox13
             // 
             this.groupBox13.Controls.Add(this.BarcodeRule);
+            this.groupBox13.Controls.Add(this.txtMesSaveResultTimeoutSeconds);
+            this.groupBox13.Controls.Add(this.labelMesSaveResultTimeoutSeconds);
             this.groupBox13.Controls.Add(this.label19);
             this.groupBox13.Controls.Add(this.EnableReportConfigParam);
             this.groupBox13.Controls.Add(this.EnableReportRealTimeParam);
@@ -1700,11 +1706,32 @@ namespace MesDatas.Views
             // 
             // BarcodeRule
             // 
-            this.BarcodeRule.Location = new System.Drawing.Point(255, 229);
+            this.BarcodeRule.Location = new System.Drawing.Point(256, 224);
             this.BarcodeRule.Margin = new System.Windows.Forms.Padding(2);
             this.BarcodeRule.Name = "BarcodeRule";
             this.BarcodeRule.Size = new System.Drawing.Size(166, 30);
             this.BarcodeRule.TabIndex = 9;
+            // 
+            // txtMesSaveResultTimeoutSeconds
+            // 
+            this.txtMesSaveResultTimeoutSeconds.Location = new System.Drawing.Point(256, 166);
+            this.txtMesSaveResultTimeoutSeconds.Margin = new System.Windows.Forms.Padding(2);
+            this.txtMesSaveResultTimeoutSeconds.Name = "txtMesSaveResultTimeoutSeconds";
+            this.txtMesSaveResultTimeoutSeconds.Size = new System.Drawing.Size(166, 30);
+            this.txtMesSaveResultTimeoutSeconds.TabIndex = 70;
+            this.txtMesSaveResultTimeoutSeconds.Text = "30";
+            this.txtMesSaveResultTimeoutSeconds.KeyPress += new System.Windows.Forms.KeyPressEventHandler(this.OnlyAllowDigital_KeyPress);
+            // 
+            // labelMesSaveResultTimeoutSeconds
+            // 
+            this.labelMesSaveResultTimeoutSeconds.AutoSize = true;
+            this.labelMesSaveResultTimeoutSeconds.ImeMode = System.Windows.Forms.ImeMode.NoControl;
+            this.labelMesSaveResultTimeoutSeconds.Location = new System.Drawing.Point(36, 169);
+            this.labelMesSaveResultTimeoutSeconds.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.labelMesSaveResultTimeoutSeconds.Name = "labelMesSaveResultTimeoutSeconds";
+            this.labelMesSaveResultTimeoutSeconds.Size = new System.Drawing.Size(189, 24);
+            this.labelMesSaveResultTimeoutSeconds.TabIndex = 71;
+            this.labelMesSaveResultTimeoutSeconds.Text = "MES过站超时(单位: s):";
             // 
             // label19
             // 
@@ -1721,7 +1748,7 @@ namespace MesDatas.Views
             // 
             this.EnableReportConfigParam.AutoSize = true;
             this.EnableReportConfigParam.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.EnableReportConfigParam.Location = new System.Drawing.Point(438, 243);
+            this.EnableReportConfigParam.Location = new System.Drawing.Point(438, 227);
             this.EnableReportConfigParam.Margin = new System.Windows.Forms.Padding(2);
             this.EnableReportConfigParam.Name = "EnableReportConfigParam";
             this.EnableReportConfigParam.Size = new System.Drawing.Size(212, 28);
@@ -1733,7 +1760,7 @@ namespace MesDatas.Views
             // 
             this.EnableReportRealTimeParam.AutoSize = true;
             this.EnableReportRealTimeParam.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.EnableReportRealTimeParam.Location = new System.Drawing.Point(438, 179);
+            this.EnableReportRealTimeParam.Location = new System.Drawing.Point(438, 165);
             this.EnableReportRealTimeParam.Margin = new System.Windows.Forms.Padding(2);
             this.EnableReportRealTimeParam.Name = "EnableReportRealTimeParam";
             this.EnableReportRealTimeParam.Size = new System.Drawing.Size(212, 28);
@@ -1745,7 +1772,7 @@ namespace MesDatas.Views
             // 
             this.EnableReportMachineAlarm.AutoSize = true;
             this.EnableReportMachineAlarm.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.EnableReportMachineAlarm.Location = new System.Drawing.Point(438, 112);
+            this.EnableReportMachineAlarm.Location = new System.Drawing.Point(438, 108);
             this.EnableReportMachineAlarm.Margin = new System.Windows.Forms.Padding(2);
             this.EnableReportMachineAlarm.Name = "EnableReportMachineAlarm";
             this.EnableReportMachineAlarm.Size = new System.Drawing.Size(212, 28);
@@ -1758,7 +1785,7 @@ namespace MesDatas.Views
             this.label52.AutoSize = true;
             this.label52.Font = new System.Drawing.Font("Microsoft YaHei", 12F);
             this.label52.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label52.Location = new System.Drawing.Point(3, 146);
+            this.label52.Location = new System.Drawing.Point(4, 109);
             this.label52.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.label52.Name = "label52";
             this.label52.Size = new System.Drawing.Size(251, 27);
@@ -1768,7 +1795,7 @@ namespace MesDatas.Views
             // RealtimeArgsUploadRate
             // 
             this.RealtimeArgsUploadRate.Font = new System.Drawing.Font("Microsoft YaHei", 10.8F);
-            this.RealtimeArgsUploadRate.Location = new System.Drawing.Point(254, 145);
+            this.RealtimeArgsUploadRate.Location = new System.Drawing.Point(255, 108);
             this.RealtimeArgsUploadRate.Margin = new System.Windows.Forms.Padding(2);
             this.RealtimeArgsUploadRate.Name = "RealtimeArgsUploadRate";
             this.RealtimeArgsUploadRate.Size = new System.Drawing.Size(167, 31);
@@ -1798,7 +1825,7 @@ namespace MesDatas.Views
             // 
             this.label22.AutoSize = true;
             this.label22.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label22.Location = new System.Drawing.Point(154, 232);
+            this.label22.Location = new System.Drawing.Point(155, 227);
             this.label22.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.label22.Name = "label22";
             this.label22.Size = new System.Drawing.Size(100, 24);
@@ -1807,8 +1834,10 @@ namespace MesDatas.Views
             // 
             // groupBox12
             // 
+            this.groupBox12.Controls.Add(this.cboTorqueAckTimeoutMode);
             this.groupBox12.Controls.Add(this.cboProductMode);
             this.groupBox12.Controls.Add(this.cboBanUpload);
+            this.groupBox12.Controls.Add(this.labelTorqueAckTimeoutMode);
             this.groupBox12.Controls.Add(this.cboEnforcePass);
             this.groupBox12.Controls.Add(this.label61);
             this.groupBox12.Controls.Add(this.label62);
@@ -1843,11 +1872,12 @@ namespace MesDatas.Views
             this.cboProductMode.Items.AddRange(new object[] {
             "不显示NG且阻塞",
             "显示NG且阻塞",
-            "显示NG且不阻塞"});
-            this.cboProductMode.Location = new System.Drawing.Point(103, 243);
+            "显示NG且不阻塞",
+            "先反馈再上传"});
+            this.cboProductMode.Location = new System.Drawing.Point(103, 222);
             this.cboProductMode.Margin = new System.Windows.Forms.Padding(4);
             this.cboProductMode.Name = "cboProductMode";
-            this.cboProductMode.Size = new System.Drawing.Size(141, 29);
+            this.cboProductMode.Size = new System.Drawing.Size(160, 29);
             this.cboProductMode.TabIndex = 73;
             // 
             // cboBanUpload
@@ -1863,7 +1893,7 @@ namespace MesDatas.Views
             "Screw_BA",
             "None",
             "All"});
-            this.cboBanUpload.Location = new System.Drawing.Point(609, 242);
+            this.cboBanUpload.Location = new System.Drawing.Point(408, 222);
             this.cboBanUpload.Margin = new System.Windows.Forms.Padding(4);
             this.cboBanUpload.Name = "cboBanUpload";
             this.cboBanUpload.Size = new System.Drawing.Size(128, 29);
@@ -1882,7 +1912,7 @@ namespace MesDatas.Views
             "Screw_BA",
             "None",
             "All"});
-            this.cboEnforcePass.Location = new System.Drawing.Point(377, 242);
+            this.cboEnforcePass.Location = new System.Drawing.Point(404, 257);
             this.cboEnforcePass.Margin = new System.Windows.Forms.Padding(4);
             this.cboEnforcePass.Name = "cboEnforcePass";
             this.cboEnforcePass.Size = new System.Drawing.Size(105, 29);
@@ -1892,7 +1922,7 @@ namespace MesDatas.Views
             // 
             this.label61.AutoSize = true;
             this.label61.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label61.Location = new System.Drawing.Point(517, 244);
+            this.label61.Location = new System.Drawing.Point(316, 224);
             this.label61.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.label61.Name = "label61";
             this.label61.Size = new System.Drawing.Size(100, 24);
@@ -1903,7 +1933,7 @@ namespace MesDatas.Views
             // 
             this.label62.AutoSize = true;
             this.label62.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label62.Location = new System.Drawing.Point(289, 246);
+            this.label62.Location = new System.Drawing.Point(316, 261);
             this.label62.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.label62.Name = "label62";
             this.label62.Size = new System.Drawing.Size(100, 24);
@@ -1914,12 +1944,12 @@ namespace MesDatas.Views
             // 
             this.label21.AutoSize = true;
             this.label21.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label21.Location = new System.Drawing.Point(10, 246);
+            this.label21.Location = new System.Drawing.Point(10, 225);
             this.label21.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.label21.Name = "label21";
             this.label21.Size = new System.Drawing.Size(100, 24);
             this.label21.TabIndex = 74;
-            this.label21.Text = "过站失败：";
+            this.label21.Text = "过站模式：";
             // 
             // EnableUpperTooling
             // 
@@ -2055,112 +2085,6 @@ namespace MesDatas.Views
             this.tableLayoutPanel33.Size = new System.Drawing.Size(468, 299);
             this.tableLayoutPanel33.TabIndex = 75;
             // 
-            // grpTorqueConfig
-            // 
-            this.grpTorqueConfig.Controls.Add(this.grpTorqueControllerConfig2);
-            this.grpTorqueConfig.Controls.Add(this.grpTorqueControllerConfig1);
-            this.grpTorqueConfig.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.grpTorqueConfig.ForeColor = System.Drawing.SystemColors.ControlDarkDark;
-            this.grpTorqueConfig.Location = new System.Drawing.Point(3, 3);
-            this.grpTorqueConfig.Name = "grpTorqueConfig";
-            this.tableLayoutPanel33.SetRowSpan(this.grpTorqueConfig, 2);
-            this.grpTorqueConfig.Size = new System.Drawing.Size(247, 293);
-            this.grpTorqueConfig.TabIndex = 83;
-            this.grpTorqueConfig.TabStop = false;
-            this.grpTorqueConfig.Text = "扭力控制器连接参数";
-            // 
-            // grpTorqueControllerConfig2
-            // 
-            this.grpTorqueControllerConfig2.Controls.Add(this.txtControllerPort2);
-            this.grpTorqueControllerConfig2.Controls.Add(this.txtControllerIP2);
-            this.grpTorqueControllerConfig2.Controls.Add(this.lblIP2);
-            this.grpTorqueControllerConfig2.Controls.Add(this.lblPort2);
-            this.grpTorqueControllerConfig2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.grpTorqueControllerConfig2.Location = new System.Drawing.Point(3, 152);
-            this.grpTorqueControllerConfig2.Name = "grpTorqueControllerConfig2";
-            this.grpTorqueControllerConfig2.Size = new System.Drawing.Size(241, 138);
-            this.grpTorqueControllerConfig2.TabIndex = 1;
-            this.grpTorqueControllerConfig2.TabStop = false;
-            this.grpTorqueControllerConfig2.Text = "Screw-BA";
-            // 
-            // txtControllerPort2
-            // 
-            this.txtControllerPort2.Location = new System.Drawing.Point(87, 88);
-            this.txtControllerPort2.Name = "txtControllerPort2";
-            this.txtControllerPort2.Size = new System.Drawing.Size(124, 30);
-            this.txtControllerPort2.TabIndex = 1;
-            // 
-            // txtControllerIP2
-            // 
-            this.txtControllerIP2.Location = new System.Drawing.Point(87, 37);
-            this.txtControllerIP2.Name = "txtControllerIP2";
-            this.txtControllerIP2.Size = new System.Drawing.Size(124, 30);
-            this.txtControllerIP2.TabIndex = 1;
-            // 
-            // lblIP2
-            // 
-            this.lblIP2.AutoSize = true;
-            this.lblIP2.Location = new System.Drawing.Point(54, 40);
-            this.lblIP2.Name = "lblIP2";
-            this.lblIP2.Size = new System.Drawing.Size(27, 24);
-            this.lblIP2.TabIndex = 0;
-            this.lblIP2.Text = "Ip";
-            // 
-            // lblPort2
-            // 
-            this.lblPort2.AutoSize = true;
-            this.lblPort2.Location = new System.Drawing.Point(37, 90);
-            this.lblPort2.Name = "lblPort2";
-            this.lblPort2.Size = new System.Drawing.Size(46, 24);
-            this.lblPort2.TabIndex = 0;
-            this.lblPort2.Text = "Port";
-            // 
-            // grpTorqueControllerConfig1
-            // 
-            this.grpTorqueControllerConfig1.Controls.Add(this.txtControllerPort1);
-            this.grpTorqueControllerConfig1.Controls.Add(this.txtControllerIP1);
-            this.grpTorqueControllerConfig1.Controls.Add(this.lblPort1);
-            this.grpTorqueControllerConfig1.Controls.Add(this.lblIP1);
-            this.grpTorqueControllerConfig1.Dock = System.Windows.Forms.DockStyle.Top;
-            this.grpTorqueControllerConfig1.Location = new System.Drawing.Point(3, 26);
-            this.grpTorqueControllerConfig1.Name = "grpTorqueControllerConfig1";
-            this.grpTorqueControllerConfig1.Size = new System.Drawing.Size(241, 126);
-            this.grpTorqueControllerConfig1.TabIndex = 0;
-            this.grpTorqueControllerConfig1.TabStop = false;
-            this.grpTorqueControllerConfig1.Text = "Scan-ASSY";
-            // 
-            // txtControllerPort1
-            // 
-            this.txtControllerPort1.Location = new System.Drawing.Point(87, 80);
-            this.txtControllerPort1.Name = "txtControllerPort1";
-            this.txtControllerPort1.Size = new System.Drawing.Size(124, 30);
-            this.txtControllerPort1.TabIndex = 1;
-            // 
-            // txtControllerIP1
-            // 
-            this.txtControllerIP1.Location = new System.Drawing.Point(87, 29);
-            this.txtControllerIP1.Name = "txtControllerIP1";
-            this.txtControllerIP1.Size = new System.Drawing.Size(124, 30);
-            this.txtControllerIP1.TabIndex = 1;
-            // 
-            // lblPort1
-            // 
-            this.lblPort1.AutoSize = true;
-            this.lblPort1.Location = new System.Drawing.Point(37, 82);
-            this.lblPort1.Name = "lblPort1";
-            this.lblPort1.Size = new System.Drawing.Size(46, 24);
-            this.lblPort1.TabIndex = 0;
-            this.lblPort1.Text = "Port";
-            // 
-            // lblIP1
-            // 
-            this.lblIP1.AutoSize = true;
-            this.lblIP1.Location = new System.Drawing.Point(54, 32);
-            this.lblIP1.Name = "lblIP1";
-            this.lblIP1.Size = new System.Drawing.Size(26, 24);
-            this.lblIP1.TabIndex = 0;
-            this.lblIP1.Text = "IP";
-            // 
             // ProductConfig_SaveButton
             // 
             this.ProductConfig_SaveButton.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -2176,10 +2100,10 @@ namespace MesDatas.Views
             // 
             // grpTorqueMeterConfig
             // 
-            this.grpTorqueMeterConfig.Controls.Add(this.btnRefresh);
             this.grpTorqueMeterConfig.Controls.Add(this.cmbCOM2);
             this.grpTorqueMeterConfig.Controls.Add(this.lblCOM2);
             this.grpTorqueMeterConfig.Controls.Add(this.cmbCOM1);
+            this.grpTorqueMeterConfig.Controls.Add(this.btnRefresh);
             this.grpTorqueMeterConfig.Controls.Add(this.lblCOM1);
             this.grpTorqueMeterConfig.Dock = System.Windows.Forms.DockStyle.Fill;
             this.grpTorqueMeterConfig.ForeColor = System.Drawing.SystemColors.ControlDarkDark;
@@ -2190,11 +2114,32 @@ namespace MesDatas.Views
             this.grpTorqueMeterConfig.TabStop = false;
             this.grpTorqueMeterConfig.Text = "扭力仪串口设定";
             // 
+            // cboTorqueAckTimeoutMode
+            // 
+            this.cboTorqueAckTimeoutMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cboTorqueAckTimeoutMode.FormattingEnabled = true;
+            this.cboTorqueAckTimeoutMode.Items.AddRange(new object[] {
+            "报警并等待ACK",
+            "后台等待ACK"});
+            this.cboTorqueAckTimeoutMode.Location = new System.Drawing.Point(571, 254);
+            this.cboTorqueAckTimeoutMode.Name = "cboTorqueAckTimeoutMode";
+            this.cboTorqueAckTimeoutMode.Size = new System.Drawing.Size(157, 31);
+            this.cboTorqueAckTimeoutMode.TabIndex = 4;
+            // 
+            // labelTorqueAckTimeoutMode
+            // 
+            this.labelTorqueAckTimeoutMode.AutoSize = true;
+            this.labelTorqueAckTimeoutMode.Location = new System.Drawing.Point(567, 227);
+            this.labelTorqueAckTimeoutMode.Name = "labelTorqueAckTimeoutMode";
+            this.labelTorqueAckTimeoutMode.Size = new System.Drawing.Size(150, 24);
+            this.labelTorqueAckTimeoutMode.TabIndex = 3;
+            this.labelTorqueAckTimeoutMode.Text = "PLC接收超时处理";
+            // 
             // btnRefresh
             // 
-            this.btnRefresh.Location = new System.Drawing.Point(86, 141);
+            this.btnRefresh.Location = new System.Drawing.Point(86, 142);
             this.btnRefresh.Name = "btnRefresh";
-            this.btnRefresh.Size = new System.Drawing.Size(94, 31);
+            this.btnRefresh.Size = new System.Drawing.Size(94, 35);
             this.btnRefresh.TabIndex = 2;
             this.btnRefresh.Text = "刷新串口";
             this.btnRefresh.UseVisualStyleBackColor = true;
@@ -2233,6 +2178,112 @@ namespace MesDatas.Views
             this.lblCOM1.Size = new System.Drawing.Size(57, 24);
             this.lblCOM1.TabIndex = 0;
             this.lblCOM1.Text = "工序1";
+            // 
+            // grpTorqueConfig
+            // 
+            this.grpTorqueConfig.Controls.Add(this.grpTorqueControllerConfig2);
+            this.grpTorqueConfig.Controls.Add(this.grpTorqueControllerConfig1);
+            this.grpTorqueConfig.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.grpTorqueConfig.ForeColor = System.Drawing.SystemColors.ControlDarkDark;
+            this.grpTorqueConfig.Location = new System.Drawing.Point(3, 3);
+            this.grpTorqueConfig.Name = "grpTorqueConfig";
+            this.tableLayoutPanel33.SetRowSpan(this.grpTorqueConfig, 2);
+            this.grpTorqueConfig.Size = new System.Drawing.Size(247, 293);
+            this.grpTorqueConfig.TabIndex = 83;
+            this.grpTorqueConfig.TabStop = false;
+            this.grpTorqueConfig.Text = "扭力控制器连接参数";
+            // 
+            // grpTorqueControllerConfig2
+            // 
+            this.grpTorqueControllerConfig2.Controls.Add(this.txtControllerPort2);
+            this.grpTorqueControllerConfig2.Controls.Add(this.txtControllerIP2);
+            this.grpTorqueControllerConfig2.Controls.Add(this.lblIP2);
+            this.grpTorqueControllerConfig2.Controls.Add(this.lblPort2);
+            this.grpTorqueControllerConfig2.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.grpTorqueControllerConfig2.Location = new System.Drawing.Point(3, 152);
+            this.grpTorqueControllerConfig2.Name = "grpTorqueControllerConfig2";
+            this.grpTorqueControllerConfig2.Size = new System.Drawing.Size(241, 138);
+            this.grpTorqueControllerConfig2.TabIndex = 1;
+            this.grpTorqueControllerConfig2.TabStop = false;
+            this.grpTorqueControllerConfig2.Text = "Screw-BA";
+            // 
+            // txtControllerPort2
+            // 
+            this.txtControllerPort2.Location = new System.Drawing.Point(58, 92);
+            this.txtControllerPort2.Name = "txtControllerPort2";
+            this.txtControllerPort2.Size = new System.Drawing.Size(124, 30);
+            this.txtControllerPort2.TabIndex = 1;
+            // 
+            // txtControllerIP2
+            // 
+            this.txtControllerIP2.Location = new System.Drawing.Point(58, 41);
+            this.txtControllerIP2.Name = "txtControllerIP2";
+            this.txtControllerIP2.Size = new System.Drawing.Size(124, 30);
+            this.txtControllerIP2.TabIndex = 1;
+            // 
+            // lblIP2
+            // 
+            this.lblIP2.AutoSize = true;
+            this.lblIP2.Location = new System.Drawing.Point(25, 44);
+            this.lblIP2.Name = "lblIP2";
+            this.lblIP2.Size = new System.Drawing.Size(27, 24);
+            this.lblIP2.TabIndex = 0;
+            this.lblIP2.Text = "Ip";
+            // 
+            // lblPort2
+            // 
+            this.lblPort2.AutoSize = true;
+            this.lblPort2.Location = new System.Drawing.Point(8, 94);
+            this.lblPort2.Name = "lblPort2";
+            this.lblPort2.Size = new System.Drawing.Size(46, 24);
+            this.lblPort2.TabIndex = 0;
+            this.lblPort2.Text = "Port";
+            // 
+            // grpTorqueControllerConfig1
+            // 
+            this.grpTorqueControllerConfig1.Controls.Add(this.txtControllerPort1);
+            this.grpTorqueControllerConfig1.Controls.Add(this.txtControllerIP1);
+            this.grpTorqueControllerConfig1.Controls.Add(this.lblPort1);
+            this.grpTorqueControllerConfig1.Controls.Add(this.lblIP1);
+            this.grpTorqueControllerConfig1.Dock = System.Windows.Forms.DockStyle.Top;
+            this.grpTorqueControllerConfig1.Location = new System.Drawing.Point(3, 26);
+            this.grpTorqueControllerConfig1.Name = "grpTorqueControllerConfig1";
+            this.grpTorqueControllerConfig1.Size = new System.Drawing.Size(241, 126);
+            this.grpTorqueControllerConfig1.TabIndex = 0;
+            this.grpTorqueControllerConfig1.TabStop = false;
+            this.grpTorqueControllerConfig1.Text = "Scan-ASSY";
+            // 
+            // txtControllerPort1
+            // 
+            this.txtControllerPort1.Location = new System.Drawing.Point(58, 80);
+            this.txtControllerPort1.Name = "txtControllerPort1";
+            this.txtControllerPort1.Size = new System.Drawing.Size(124, 30);
+            this.txtControllerPort1.TabIndex = 1;
+            // 
+            // txtControllerIP1
+            // 
+            this.txtControllerIP1.Location = new System.Drawing.Point(58, 29);
+            this.txtControllerIP1.Name = "txtControllerIP1";
+            this.txtControllerIP1.Size = new System.Drawing.Size(124, 30);
+            this.txtControllerIP1.TabIndex = 1;
+            // 
+            // lblPort1
+            // 
+            this.lblPort1.AutoSize = true;
+            this.lblPort1.Location = new System.Drawing.Point(8, 82);
+            this.lblPort1.Name = "lblPort1";
+            this.lblPort1.Size = new System.Drawing.Size(46, 24);
+            this.lblPort1.TabIndex = 0;
+            this.lblPort1.Text = "Port";
+            // 
+            // lblIP1
+            // 
+            this.lblIP1.AutoSize = true;
+            this.lblIP1.Location = new System.Drawing.Point(25, 32);
+            this.lblIP1.Name = "lblIP1";
+            this.lblIP1.Size = new System.Drawing.Size(26, 24);
+            this.lblIP1.TabIndex = 0;
+            this.lblIP1.Text = "IP";
             // 
             // groupBox16
             // 
@@ -6342,19 +6393,44 @@ namespace MesDatas.Views
             this.tabPageTorqueMonitor.Text = "扭力监测";
             this.tabPageTorqueMonitor.UseVisualStyleBackColor = true;
             // 
-            // label63
+            // tlpTorqueMonitor
             // 
-            this.label63.AutoSize = true;
-            this.label63.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label63.Font = new System.Drawing.Font("SimSun", 15.2F, System.Drawing.FontStyle.Bold);
-            this.label63.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label63.Location = new System.Drawing.Point(3, 119);
-            this.label63.Margin = new System.Windows.Forms.Padding(3);
-            this.label63.Name = "label63";
-            this.label63.Size = new System.Drawing.Size(153, 26);
-            this.label63.TabIndex = 118;
-            this.label63.Text = "Screw-BA";
-            this.label63.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.tlpTorqueMonitor.ColumnCount = 4;
+            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.65998F));
+            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.92397F));
+            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 24.70961F));
+            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 23.81204F));
+            this.tlpTorqueMonitor.Controls.Add(this.panelASSY, 0, 0);
+            this.tlpTorqueMonitor.Controls.Add(this.panelAS, 1, 0);
+            this.tlpTorqueMonitor.Controls.Add(this.panelTorqueMeter1, 2, 0);
+            this.tlpTorqueMonitor.Controls.Add(this.panelTorqueMonitor2, 3, 0);
+            this.tlpTorqueMonitor.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tlpTorqueMonitor.Location = new System.Drawing.Point(0, 0);
+            this.tlpTorqueMonitor.Name = "tlpTorqueMonitor";
+            this.tlpTorqueMonitor.RowCount = 1;
+            this.tlpTorqueMonitor.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.tlpTorqueMonitor.Size = new System.Drawing.Size(1894, 984);
+            this.tlpTorqueMonitor.TabIndex = 48;
+            // 
+            // panelASSY
+            // 
+            this.panelASSY.Controls.Add(this.rtbASSYLog);
+            this.panelASSY.Controls.Add(this.tlpScan_ASSY);
+            this.panelASSY.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelASSY.Location = new System.Drawing.Point(3, 3);
+            this.panelASSY.Name = "panelASSY";
+            this.panelASSY.Size = new System.Drawing.Size(479, 978);
+            this.panelASSY.TabIndex = 48;
+            // 
+            // rtbASSYLog
+            // 
+            this.rtbASSYLog.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.rtbASSYLog.Location = new System.Drawing.Point(0, 148);
+            this.rtbASSYLog.Margin = new System.Windows.Forms.Padding(2);
+            this.rtbASSYLog.Name = "rtbASSYLog";
+            this.rtbASSYLog.Size = new System.Drawing.Size(479, 830);
+            this.rtbASSYLog.TabIndex = 0;
+            this.rtbASSYLog.Text = "";
             // 
             // tlpScan_ASSY
             // 
@@ -6503,24 +6579,71 @@ namespace MesDatas.Views
             this.ASSY.Text = "██";
             this.ASSY.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
-            // tlpTorqueMonitor
+            // panelAS
             // 
-            this.tlpTorqueMonitor.ColumnCount = 4;
-            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.65998F));
-            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.92397F));
-            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 24.70961F));
-            this.tlpTorqueMonitor.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 23.81204F));
-            this.tlpTorqueMonitor.Controls.Add(this.panelASSY, 0, 0);
-            this.tlpTorqueMonitor.Controls.Add(this.panelAS, 1, 0);
-            this.tlpTorqueMonitor.Controls.Add(this.panelTorqueMeter1, 2, 0);
-            this.tlpTorqueMonitor.Controls.Add(this.panelTorqueMonitor2, 3, 0);
-            this.tlpTorqueMonitor.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tlpTorqueMonitor.Location = new System.Drawing.Point(0, 0);
-            this.tlpTorqueMonitor.Name = "tlpTorqueMonitor";
-            this.tlpTorqueMonitor.RowCount = 1;
-            this.tlpTorqueMonitor.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tlpTorqueMonitor.Size = new System.Drawing.Size(1894, 984);
-            this.tlpTorqueMonitor.TabIndex = 48;
+            this.panelAS.Controls.Add(this.rtbBALog);
+            this.panelAS.Controls.Add(this.tlpScrew_BA);
+            this.panelAS.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelAS.Location = new System.Drawing.Point(488, 3);
+            this.panelAS.Name = "panelAS";
+            this.panelAS.Size = new System.Drawing.Size(484, 978);
+            this.panelAS.TabIndex = 47;
+            // 
+            // rtbBALog
+            // 
+            this.rtbBALog.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.rtbBALog.Location = new System.Drawing.Point(0, 148);
+            this.rtbBALog.Margin = new System.Windows.Forms.Padding(2);
+            this.rtbBALog.Name = "rtbBALog";
+            this.rtbBALog.Size = new System.Drawing.Size(484, 830);
+            this.rtbBALog.TabIndex = 46;
+            this.rtbBALog.Text = "";
+            // 
+            // tlpScrew_BA
+            // 
+            this.tlpScrew_BA.ColumnCount = 2;
+            this.tlpScrew_BA.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 32.85421F));
+            this.tlpScrew_BA.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 67.14579F));
+            this.tlpScrew_BA.Controls.Add(this.label63, 0, 1);
+            this.tlpScrew_BA.Controls.Add(this.BA, 0, 0);
+            this.tlpScrew_BA.Controls.Add(this.groupBox32, 1, 0);
+            this.tlpScrew_BA.Dock = System.Windows.Forms.DockStyle.Top;
+            this.tlpScrew_BA.Location = new System.Drawing.Point(0, 0);
+            this.tlpScrew_BA.Margin = new System.Windows.Forms.Padding(2);
+            this.tlpScrew_BA.Name = "tlpScrew_BA";
+            this.tlpScrew_BA.RowCount = 2;
+            this.tlpScrew_BA.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.tlpScrew_BA.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tlpScrew_BA.Size = new System.Drawing.Size(484, 148);
+            this.tlpScrew_BA.TabIndex = 46;
+            // 
+            // label63
+            // 
+            this.label63.AutoSize = true;
+            this.label63.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.label63.Font = new System.Drawing.Font("SimSun", 15.2F, System.Drawing.FontStyle.Bold);
+            this.label63.ImeMode = System.Windows.Forms.ImeMode.NoControl;
+            this.label63.Location = new System.Drawing.Point(3, 119);
+            this.label63.Margin = new System.Windows.Forms.Padding(3);
+            this.label63.Name = "label63";
+            this.label63.Size = new System.Drawing.Size(153, 26);
+            this.label63.TabIndex = 118;
+            this.label63.Text = "Screw-BA";
+            this.label63.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
+            // BA
+            // 
+            this.BA.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.BA.Font = new System.Drawing.Font("Microsoft YaHei", 22F);
+            this.BA.ForeColor = System.Drawing.SystemColors.AppWorkspace;
+            this.BA.ImeMode = System.Windows.Forms.ImeMode.NoControl;
+            this.BA.Location = new System.Drawing.Point(2, 0);
+            this.BA.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.BA.Name = "BA";
+            this.BA.Size = new System.Drawing.Size(155, 116);
+            this.BA.TabIndex = 117;
+            this.BA.Text = "██";
+            this.BA.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
             // groupBox32
             // 
@@ -6623,78 +6746,6 @@ namespace MesDatas.Views
             this.label134.TabIndex = 4;
             this.label134.Text = "上限值：";
             // 
-            // BA
-            // 
-            this.BA.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.BA.Font = new System.Drawing.Font("Microsoft YaHei", 22F);
-            this.BA.ForeColor = System.Drawing.SystemColors.AppWorkspace;
-            this.BA.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.BA.Location = new System.Drawing.Point(2, 0);
-            this.BA.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
-            this.BA.Name = "BA";
-            this.BA.Size = new System.Drawing.Size(155, 116);
-            this.BA.TabIndex = 117;
-            this.BA.Text = "██";
-            this.BA.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-            // 
-            // rtbBALog
-            // 
-            this.rtbBALog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.rtbBALog.Location = new System.Drawing.Point(0, 148);
-            this.rtbBALog.Margin = new System.Windows.Forms.Padding(2);
-            this.rtbBALog.Name = "rtbBALog";
-            this.rtbBALog.Size = new System.Drawing.Size(484, 830);
-            this.rtbBALog.TabIndex = 46;
-            this.rtbBALog.Text = "";
-            // 
-            // rtbASSYLog
-            // 
-            this.rtbASSYLog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.rtbASSYLog.Location = new System.Drawing.Point(0, 148);
-            this.rtbASSYLog.Margin = new System.Windows.Forms.Padding(2);
-            this.rtbASSYLog.Name = "rtbASSYLog";
-            this.rtbASSYLog.Size = new System.Drawing.Size(479, 830);
-            this.rtbASSYLog.TabIndex = 0;
-            this.rtbASSYLog.Text = "";
-            // 
-            // tlpScrew_BA
-            // 
-            this.tlpScrew_BA.ColumnCount = 2;
-            this.tlpScrew_BA.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 32.85421F));
-            this.tlpScrew_BA.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 67.14579F));
-            this.tlpScrew_BA.Controls.Add(this.label63, 0, 1);
-            this.tlpScrew_BA.Controls.Add(this.BA, 0, 0);
-            this.tlpScrew_BA.Controls.Add(this.groupBox32, 1, 0);
-            this.tlpScrew_BA.Dock = System.Windows.Forms.DockStyle.Top;
-            this.tlpScrew_BA.Location = new System.Drawing.Point(0, 0);
-            this.tlpScrew_BA.Margin = new System.Windows.Forms.Padding(2);
-            this.tlpScrew_BA.Name = "tlpScrew_BA";
-            this.tlpScrew_BA.RowCount = 2;
-            this.tlpScrew_BA.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tlpScrew_BA.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tlpScrew_BA.Size = new System.Drawing.Size(484, 148);
-            this.tlpScrew_BA.TabIndex = 46;
-            // 
-            // panelAS
-            // 
-            this.panelAS.Controls.Add(this.rtbBALog);
-            this.panelAS.Controls.Add(this.tlpScrew_BA);
-            this.panelAS.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelAS.Location = new System.Drawing.Point(488, 3);
-            this.panelAS.Name = "panelAS";
-            this.panelAS.Size = new System.Drawing.Size(484, 978);
-            this.panelAS.TabIndex = 47;
-            // 
-            // panelASSY
-            // 
-            this.panelASSY.Controls.Add(this.rtbASSYLog);
-            this.panelASSY.Controls.Add(this.tlpScan_ASSY);
-            this.panelASSY.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelASSY.Location = new System.Drawing.Point(3, 3);
-            this.panelASSY.Name = "panelASSY";
-            this.panelASSY.Size = new System.Drawing.Size(479, 978);
-            this.panelASSY.TabIndex = 48;
-            // 
             // panelTorqueMeter1
             // 
             this.panelTorqueMeter1.Controls.Add(this.rtbTorqueMeter1);
@@ -6704,6 +6755,16 @@ namespace MesDatas.Views
             this.panelTorqueMeter1.Name = "panelTorqueMeter1";
             this.panelTorqueMeter1.Size = new System.Drawing.Size(461, 978);
             this.panelTorqueMeter1.TabIndex = 49;
+            // 
+            // rtbTorqueMeter1
+            // 
+            this.rtbTorqueMeter1.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.rtbTorqueMeter1.Location = new System.Drawing.Point(0, 148);
+            this.rtbTorqueMeter1.Margin = new System.Windows.Forms.Padding(2);
+            this.rtbTorqueMeter1.Name = "rtbTorqueMeter1";
+            this.rtbTorqueMeter1.Size = new System.Drawing.Size(461, 830);
+            this.rtbTorqueMeter1.TabIndex = 48;
+            this.rtbTorqueMeter1.Text = "";
             // 
             // tlpTorqueMeter1
             // 
@@ -6808,16 +6869,6 @@ namespace MesDatas.Views
             this.label144.TabIndex = 6;
             this.label144.Text = "上传结果：";
             // 
-            // rtbTorqueMeter1
-            // 
-            this.rtbTorqueMeter1.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.rtbTorqueMeter1.Location = new System.Drawing.Point(0, 148);
-            this.rtbTorqueMeter1.Margin = new System.Windows.Forms.Padding(2);
-            this.rtbTorqueMeter1.Name = "rtbTorqueMeter1";
-            this.rtbTorqueMeter1.Size = new System.Drawing.Size(461, 830);
-            this.rtbTorqueMeter1.TabIndex = 48;
-            this.rtbTorqueMeter1.Text = "";
-            // 
             // panelTorqueMonitor2
             // 
             this.panelTorqueMonitor2.Controls.Add(this.rtbTorqueMeter2);
@@ -6827,6 +6878,16 @@ namespace MesDatas.Views
             this.panelTorqueMonitor2.Name = "panelTorqueMonitor2";
             this.panelTorqueMonitor2.Size = new System.Drawing.Size(446, 978);
             this.panelTorqueMonitor2.TabIndex = 50;
+            // 
+            // rtbTorqueMeter2
+            // 
+            this.rtbTorqueMeter2.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.rtbTorqueMeter2.Location = new System.Drawing.Point(0, 148);
+            this.rtbTorqueMeter2.Margin = new System.Windows.Forms.Padding(2);
+            this.rtbTorqueMeter2.Name = "rtbTorqueMeter2";
+            this.rtbTorqueMeter2.Size = new System.Drawing.Size(446, 830);
+            this.rtbTorqueMeter2.TabIndex = 49;
+            this.rtbTorqueMeter2.Text = "";
             // 
             // tlpTorqueMeter2
             // 
@@ -6891,26 +6952,6 @@ namespace MesDatas.Views
             this.grpTorqueMonitor2.TabStop = false;
             this.grpTorqueMonitor2.Text = "扭力仪点检2";
             // 
-            // label11
-            // 
-            this.label11.AutoSize = true;
-            this.label11.Location = new System.Drawing.Point(23, 98);
-            this.label11.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
-            this.label11.Name = "label11";
-            this.label11.Size = new System.Drawing.Size(100, 24);
-            this.label11.TabIndex = 6;
-            this.label11.Text = "上传结果：";
-            // 
-            // label137
-            // 
-            this.label137.AutoSize = true;
-            this.label137.Location = new System.Drawing.Point(41, 42);
-            this.label137.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
-            this.label137.Name = "label137";
-            this.label137.Size = new System.Drawing.Size(82, 24);
-            this.label137.TabIndex = 5;
-            this.label137.Text = "实际值：";
-            // 
             // label139
             // 
             this.label139.AutoSize = true;
@@ -6931,15 +6972,25 @@ namespace MesDatas.Views
             this.label141.TabIndex = 0;
             this.label141.Text = "res";
             // 
-            // rtbTorqueMeter2
+            // label137
             // 
-            this.rtbTorqueMeter2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.rtbTorqueMeter2.Location = new System.Drawing.Point(0, 148);
-            this.rtbTorqueMeter2.Margin = new System.Windows.Forms.Padding(2);
-            this.rtbTorqueMeter2.Name = "rtbTorqueMeter2";
-            this.rtbTorqueMeter2.Size = new System.Drawing.Size(446, 830);
-            this.rtbTorqueMeter2.TabIndex = 49;
-            this.rtbTorqueMeter2.Text = "";
+            this.label137.AutoSize = true;
+            this.label137.Location = new System.Drawing.Point(41, 42);
+            this.label137.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.label137.Name = "label137";
+            this.label137.Size = new System.Drawing.Size(82, 24);
+            this.label137.TabIndex = 5;
+            this.label137.Text = "实际值：";
+            // 
+            // label11
+            // 
+            this.label11.AutoSize = true;
+            this.label11.Location = new System.Drawing.Point(23, 98);
+            this.label11.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.label11.Name = "label11";
+            this.label11.Size = new System.Drawing.Size(100, 24);
+            this.label11.TabIndex = 6;
+            this.label11.Text = "上传结果：";
             // 
             // Form1
             // 
@@ -7010,13 +7061,13 @@ namespace MesDatas.Views
             this.groupBox12.PerformLayout();
             this.panel3.ResumeLayout(false);
             this.tableLayoutPanel33.ResumeLayout(false);
+            this.grpTorqueMeterConfig.ResumeLayout(false);
+            this.grpTorqueMeterConfig.PerformLayout();
             this.grpTorqueConfig.ResumeLayout(false);
             this.grpTorqueControllerConfig2.ResumeLayout(false);
             this.grpTorqueControllerConfig2.PerformLayout();
             this.grpTorqueControllerConfig1.ResumeLayout(false);
             this.grpTorqueControllerConfig1.PerformLayout();
-            this.grpTorqueMeterConfig.ResumeLayout(false);
-            this.grpTorqueMeterConfig.PerformLayout();
             this.groupBox16.ResumeLayout(false);
             this.groupBox16.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvPrintDirectory)).EndInit();
@@ -7116,17 +7167,17 @@ namespace MesDatas.Views
             this.tableLayoutPanel17.ResumeLayout(false);
             this.TabContorl.ResumeLayout(false);
             this.tabPageTorqueMonitor.ResumeLayout(false);
+            this.tlpTorqueMonitor.ResumeLayout(false);
+            this.panelASSY.ResumeLayout(false);
             this.tlpScan_ASSY.ResumeLayout(false);
             this.tlpScan_ASSY.PerformLayout();
             this.groupBox31.ResumeLayout(false);
             this.groupBox31.PerformLayout();
-            this.tlpTorqueMonitor.ResumeLayout(false);
-            this.groupBox32.ResumeLayout(false);
-            this.groupBox32.PerformLayout();
+            this.panelAS.ResumeLayout(false);
             this.tlpScrew_BA.ResumeLayout(false);
             this.tlpScrew_BA.PerformLayout();
-            this.panelAS.ResumeLayout(false);
-            this.panelASSY.ResumeLayout(false);
+            this.groupBox32.ResumeLayout(false);
+            this.groupBox32.PerformLayout();
             this.panelTorqueMeter1.ResumeLayout(false);
             this.tlpTorqueMeter1.ResumeLayout(false);
             this.tlpTorqueMeter1.PerformLayout();
@@ -7369,6 +7420,8 @@ namespace MesDatas.Views
         private CheckBox EnableReportMachineStatus;
         private TextBox HeartbeatUploadRate;
         private TextBox BarcodeRule;
+        private TextBox txtMesSaveResultTimeoutSeconds;
+        private Label labelMesSaveResultTimeoutSeconds;
         private GroupBox groupBox12;
         private Label label21;
         private ComboBox cboProductMode;
@@ -7585,6 +7638,8 @@ namespace MesDatas.Views
         private Button btnSave_KeyArgs;
         private Panel panel3;
         private GroupBox grpTorqueMeterConfig;
+        private ComboBox cboTorqueAckTimeoutMode;
+        private Label labelTorqueAckTimeoutMode;
         private ComboBox cmbCOM2;
         private Label lblCOM2;
         private ComboBox cmbCOM1;
