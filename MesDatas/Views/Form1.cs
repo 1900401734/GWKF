@@ -4598,12 +4598,11 @@ namespace MesDatas.Views
         }
 
         /// <summary>
-        /// 实时监控电批状态并静默比对PLC互锁信号
+        /// 每秒按电批连接状态写入PLC互锁信号：1=允许打螺钉，2=禁止。
+        /// <para>只根据当前连接状态写入，不读取比对、不判断是否已同步。</para>
         /// </summary>
         private async Task TorqueInterlockMonitorLoopAsync(CancellationToken token)
         {
-            // 目标状态：1=允许打螺钉, 2=禁止打螺钉
-
             while (!token.IsCancellationRequested)
             {
                 await Task.Delay(1000, token);
@@ -4612,40 +4611,30 @@ namespace MesDatas.Views
 
                 if (_clientScanAssy == null || _clientScrewBa == null) continue;
 
-                // ---------- 工序1 互锁监控 ----------
+                // ---------- 工序1 互锁：按连接状态每秒写入 ----------
 
-                short targetVal1 = GetTorqueReadyTarget(ProcessName.Scan_ASSY, _clientScanAssy.IsConnected);
+                short targetVal1 = _clientScanAssy.IsConnected ? (short)1 : (short)2;
+                await WriteInterlockAsync(addrInfo.TorqueReady1, targetVal1, "工序1电批互锁信号写入失败", token);
 
-                var readRes1 = await _readWriteNet.ReadInt16Async(addrInfo.TorqueReady1);
+                // ---------- 工序3 互锁：按连接状态每秒写入 ----------
 
-                if (readRes1.IsSuccess && readRes1.Content != targetVal1)
-                {
-                    var writeTask = _readWriteNet.WriteAsync(addrInfo.TorqueReady1, targetVal1);
-                    var completedTask = await Task.WhenAny(writeTask, Task.Delay(3000));
-
-                    if (completedTask != writeTask || !writeTask.Result.IsSuccess)
-                        HandleError(addrInfo.TorqueReady1, targetVal1, true, "工序1电批互锁信号写入失败");
-                    else
-                        AppendLog(ProcessName.Scan_ASSY, $"[电批互锁] D7627={targetVal1}，1=允许，2=禁止");
-                }
-
-                // ---------- 工序3 互锁监控 ----------
-
-                short targetVal3 = GetTorqueReadyTarget(ProcessName.Screw_BA, _clientScrewBa.IsConnected);
-
-                var readRes3 = await _readWriteNet.ReadInt16Async(addrInfo.TorqueReady3);
-
-                if (readRes3.IsSuccess && readRes3.Content != targetVal3)
-                {
-                    var writeTask = _readWriteNet.WriteAsync(addrInfo.TorqueReady3, targetVal3);
-                    var completedTask = await Task.WhenAny(writeTask, Task.Delay(3000));
-
-                    if (completedTask != writeTask || !writeTask.Result.IsSuccess)
-                        HandleError(addrInfo.TorqueReady3, targetVal3, true, "工序3电批互锁信号写入失败");
-                    else
-                        AppendLog(ProcessName.Screw_BA, $"[电批互锁] D7637={targetVal3}，1=允许，2=禁止");
-                }
+                short targetVal3 = _clientScrewBa.IsConnected ? (short)1 : (short)2;
+                await WriteInterlockAsync(addrInfo.TorqueReady3, targetVal3, "工序3电批互锁信号写入失败", token);
             }
+        }
+
+        /// <summary>
+        /// 写入互锁信号，带3秒超时；超时或失败时上报错误。
+        /// </summary>
+        private async Task WriteInterlockAsync(string address, short value, string errorMessage, CancellationToken token)
+        {
+            var writeTask = _readWriteNet.WriteAsync(address, value);
+            var completedTask = await Task.WhenAny(writeTask, Task.Delay(3000, token));
+
+            if (token.IsCancellationRequested) return;
+
+            if (completedTask != writeTask || !writeTask.Result.IsSuccess)
+                HandleError(address, value, true, errorMessage);
         }
 
         /// <summary>
@@ -4759,23 +4748,6 @@ namespace MesDatas.Views
                 _isScrewBaWaitingTorqueAck = isWaiting;
             else
                 _isScanAssyWaitingTorqueAck = isWaiting;
-        }
-
-        /// <summary>
-        /// 判断工序是否正在等待PLC ACK。
-        /// </summary>
-        private bool IsTorqueAckWaiting(ProcessName processName)
-        {
-            return processName == ProcessName.Screw_BA ? _isScrewBaWaitingTorqueAck : _isScanAssyWaitingTorqueAck;
-        }
-
-        /// <summary>
-        /// 根据电批连接状态和ACK等待状态计算互锁目标值。
-        /// <para>现场协议：1=允许，2=禁止；PLC重启后的0会被下一轮监控纠正为目标值。</para>
-        /// </summary>
-        private short GetTorqueReadyTarget(ProcessName processName, bool isControllerConnected)
-        {
-            return isControllerConnected && !IsTorqueAckWaiting(processName) ? (short)1 : (short)2;
         }
 
         /// <summary>
