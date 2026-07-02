@@ -848,8 +848,12 @@ namespace MesDatas.Views
 
                 await Task.Delay(500);
 
-                var (isReadOk, value) = await TryReadInt16Async(addrInfo.RecoverySignal);
-                if (!isReadOk || value != 1)
+                //var (isReadOk, value) = await TryReadInt16Async(addrInfo.RecoverySignal);
+                //if (!isReadOk || value != 1)
+                //    continue;
+
+                var result = await _readWriteNet.ReadInt16Async(addrInfo.RecoverySignal);
+                if (!result.IsSuccess || result.Content != 1)
                     continue;
 
                 lblRunningStatus.ExecuteSafely(c => { c.Text = "正在复位中……"; c.ForeColor = Color.Blue; });
@@ -1158,9 +1162,16 @@ namespace MesDatas.Views
                     continue;
                 }
 
-                var (isReadOk, value) = await TryReadInt16Async(addrInfo.ModelSwitch);
-
+                /*var (isReadOk, value) = await TryReadInt16Async(addrInfo.ModelSwitch);
                 if (isReadOk && value == 1)
+                {
+                    ToolingNumber.ExecuteSafely(c => { c.Text = "型号变更请先输入生产信息！"; c.ForeColor = Color.Red; });
+
+                    ManageOrderSwitch();
+                }*/
+
+                var result = await _readWriteNet.ReadInt16Async(addrInfo.ModelSwitch);
+                if (result.IsSuccess && result.Content == 1)
                 {
                     ToolingNumber.ExecuteSafely(c => { c.Text = "型号变更请先输入生产信息！"; c.ForeColor = Color.Red; });
 
