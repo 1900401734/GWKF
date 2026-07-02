@@ -5952,18 +5952,19 @@ namespace MesDatas.Views
         {
             Invoke(new Action(() =>
             {
-                string processName = nameof(uploadManagerEntity.Name);
+                // 按实际工序名称分别计数，避免 Scan_ASSY、Weight 等页签共用同一个序号。
+                string processCounterKey = uploadManagerEntity.Name.ToString();
 
                 // 【序号管理】初始化或获取当前工序的计数器
-                if (!_processCounters.ContainsKey(processName))
+                if (!_processCounters.ContainsKey(processCounterKey))
                 {
-                    _processCounters[processName] = 0;
+                    _processCounters[processCounterKey] = 0;
                 }
 
                 // 【行数限制】
                 if (gridView.RowCount > 500)
                 {
-                    gridView.Rows.RemoveAt(dgvResult1.Rows.Count - 1);
+                    gridView.Rows.RemoveAt(gridView.Rows.Count - 1);
                 }
 
                 // 序号、时间、流程、条码、结果、型号、操作员、测试项...
@@ -5978,8 +5979,8 @@ namespace MesDatas.Views
                 for (int i = 0; i < readBarcodes.Count; i++)
                 {
                     // --- 计数器自增 (针对当前工序) ---
-                    _processCounters[processName]++;
-                    int currentNum = _processCounters[processName];
+                    _processCounters[processCounterKey]++;
+                    int currentNum = _processCounters[processCounterKey];
 
                     // --- 【关键修复】在循环内部创建新行对象 ---
                     DataGridViewRow dgvRow = new DataGridViewRow();
