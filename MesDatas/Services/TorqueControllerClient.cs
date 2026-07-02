@@ -69,21 +69,36 @@ namespace MesDatas.Services
 
         private async Task ConnectionManagerLoop(CancellationToken token)
         {
-            int failCount = 1;
-            const int FailCountMax = 3;
+            int retryCount = 1;
+            int reconnectDelayMs = InitialReconnectDelayMs;
 
-            while (!token.IsCancellationRequested && _isStarted && failCount <= FailCountMax)
+            while (!token.IsCancellationRequested && _isStarted)
             {
                 try
                 {
                     await ConnectAndRunAsync(token);
                 }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
+                    // 如果曾经连上后又断开，下一次重连从1秒开始，避免断线恢复过慢。
+                    bool wasConnected = IsConnected;
+
                     // 触发外部的互锁与HandleError
                     SetConnectionStatus(false, ex.Message);
-                    OnLog?.Invoke($"[重试次数{failCount++}] 通讯异常{ex.Message}", true);
-                    await Task.Delay(3000, token);
+                    if (wasConnected)
+                    {
+                        reconnectDelayMs = InitialReconnectDelayMs;
+                        retryCount = 1;
+                    }
+
+                    OnLog?.Invoke($"[重试次数{retryCount++}] 通讯异常{ex.Message}，下次重连等待{reconnectDelayMs / 1000.0:0.#}秒", true);
+                    await Task.Delay(reconnectDelayMs, token);
+
+                    reconnectDelayMs = Math.Min(MaxReconnectDelayMs, reconnectDelayMs * 2);
                 }
             }
         }
