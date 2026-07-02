@@ -1738,7 +1738,7 @@ namespace MesDatas.Views
 
                         // -------------------- 4. 读取 PLC 触发信号 --------------------
 
-                        PrinterSignal.AppendToComponent($"持续监测[{addrInfo.PrintTrigger}]中……");
+                        //PrinterSignal.AppendToComponent($"持续监测[{addrInfo.PrintTrigger}]中……");
                         if (!TryReadInt16Value(addrInfo.PrintTrigger, out int triggerValue))
                         {
                             Thread.Sleep(100);
@@ -2067,7 +2067,7 @@ namespace MesDatas.Views
                 if (DelayAndCheckStop(100)) return;     // 检测是否应该退出当前任务
                 if (existErrorInErrorTip) continue;          // 当前有错误，需要先清除错误后再次访问
 
-                rtbReadBarCode.AppendToComponent($"持续监测'{addrInfo.HasBarcodeTag}'信号中...");
+                //rtbReadBarCode.AppendToComponent($"持续监测'{addrInfo.HasBarcodeTag}'信号中...");
 
                 int triggerValue = _readWriteNet.ReadInt16(addrInfo.HasBarcodeTag).Content;    // 条码标识（1=触发条码验证）
                 var barcodeType = _readWriteNet.ReadInt16(addrInfo.BarcodeType).Content;       // 条码类型 (1=产品条码, 2=工装条码)
@@ -2566,7 +2566,7 @@ namespace MesDatas.Views
                 if (DelayAndCheckStop(200)) return;
                 if (existErrorInErrorTip) continue;
 
-                UploadMes.AppendToComponent("持续监测中……");
+                //UploadMes.AppendToComponent("持续监测中……");
                 Stopwatch triggerWatch = Stopwatch.StartNew();
                 TryReadInt16Value(uploadManager.triggerPoint, out int triggerValue);
                 triggerWatch.Stop();
@@ -2644,7 +2644,7 @@ namespace MesDatas.Views
                 if (DelayAndCheckStop(200)) return;
                 if (existErrorInErrorTip) continue;
 
-                UploadMes.AppendToComponent("持续监测中……");
+                //UploadMes.AppendToComponent("持续监测中……");
                 Stopwatch triggerWatch = Stopwatch.StartNew();
                 var triggerValue = _readWriteNet.ReadInt16(uploadManager.triggerPoint).Content;
                 triggerWatch.Stop();
@@ -2714,7 +2714,7 @@ namespace MesDatas.Views
                 if (DelayAndCheckStop(200)) return;
                 if (existErrorInErrorTip) continue;
 
-                UploadMes.AppendToComponent("持续监测中……");
+                //UploadMes.AppendToComponent("持续监测中……");
                 Stopwatch triggerWatch = Stopwatch.StartNew();
                 var triggerValue = _readWriteNet.ReadInt16(uploadManager.triggerPoint).Content;
                 triggerWatch.Stop();
@@ -2784,7 +2784,7 @@ namespace MesDatas.Views
                 if (DelayAndCheckStop(200)) return;
                 if (existErrorInErrorTip) continue;
 
-                UploadMes.AppendToComponent("持续监测中……");
+                //UploadMes.AppendToComponent("持续监测中……");
                 Stopwatch triggerWatch = Stopwatch.StartNew();
                 var triggerValue = _readWriteNet.ReadInt16(uploadManager.triggerPoint).Content;
                 triggerWatch.Stop();
