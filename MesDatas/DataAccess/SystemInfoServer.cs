@@ -13,6 +13,7 @@ namespace MesDatas.DataAcess
         private const string SystemInfoTableName = "SystemInfo";
         private const string MesSaveResultTimeoutColumnName = "MesSaveResultTimeoutSeconds";
         private const string TorqueAckTimeoutModeColumnName = "TorqueAckTimeoutMode";
+        private const string TorqueAckTimeoutSecondsColumnName = "TorqueAckTimeoutSeconds";
 
         // 初始化表格
         public static void InitTable()
@@ -24,6 +25,7 @@ namespace MesDatas.DataAcess
                     db.CodeFirst.InitTables<SystemInfo>();
                     EnsureMesSaveResultTimeoutColumn(db);
                     EnsureTorqueAckTimeoutModeColumn(db);
+                    EnsureTorqueAckTimeoutSecondsColumn(db);
 
                     SystemInfo plcInfo = SystemInfo.Initalize();
                     if (!db.Queryable<SystemInfo>().Where(it => it.ID == plcInfo.ID).Any())
@@ -70,6 +72,23 @@ namespace MesDatas.DataAcess
             catch
             {
                 // 字段已存在或现场数据库不支持结构变更时不阻断启动，使用程序默认值继续运行。
+            }
+        }
+
+        /// <summary>
+        /// 兼容现场旧版 Access 数据库，确保扭力 ACK 超时时间字段存在。
+        /// </summary>
+        private static void EnsureTorqueAckTimeoutSecondsColumn(SqlSugarClient db)
+        {
+            try
+            {
+                if (db.DbMaintenance.IsAnyColumn(SystemInfoTableName, TorqueAckTimeoutSecondsColumnName, false)) return;
+
+                db.Ado.ExecuteCommand($"ALTER TABLE {SystemInfoTableName} ADD COLUMN {TorqueAckTimeoutSecondsColumnName} TEXT(20)");
+            }
+            catch
+            {
+                // 字段已存在或现场数据库不支持结构变更时不阻断启动，使用程序默认3秒继续运行。
             }
         }
 

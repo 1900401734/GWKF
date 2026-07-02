@@ -119,11 +119,16 @@ namespace MesDatas.DataAcess
 
         /// <summary>
         /// PLC接收扭力结果超时后的处理方式。
-        /// <para>报警并等待ACK：弹出阻塞报警，Req保持1并等待PLC确认。</para>
-        /// <para>后台等待ACK：只记录日志，Req保持1并在后台等待PLC确认。</para>
+        /// <para>当前策略：超时清Req并报警，避免本次转发继续占用握手位。</para>
         /// </summary>
         [SugarColumn(ColumnName = "TorqueAckTimeoutMode", IsNullable = true, ColumnDescription = "PLC接收扭力结果超时处理方式")]
-        public string TorqueAckTimeoutMode { get; set; } = "报警并等待ACK";
+        public string TorqueAckTimeoutMode { get; set; } = "超时清Req并报警";
+
+        /// <summary>
+        /// PLC接收扭力ACK超时时间，单位：秒。
+        /// </summary>
+        [SugarColumn(ColumnName = "TorqueAckTimeoutSeconds", IsNullable = true, ColumnDescription = "PLC接收扭力ACK超时时间（单位：s）")]
+        public string TorqueAckTimeoutSeconds { get; set; } = "3";
 
         /// <summary>
         /// 强制过站

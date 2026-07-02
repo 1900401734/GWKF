@@ -33,10 +33,12 @@ namespace MesDatas.Views
         private const string ProductModeUploadAfterFeedback = "先反馈再上传"; // 采集完成后先反馈PLC，再后台上传MES
         private const string WeightMesPassConfirmed = "ConfirmedPass";       // Weight工序MES确认PASS后，才允许打印线程调用标签接口
         private const string DefaultMesSaveResultTimeoutSeconds = "30";      // MES过站接口默认超时时间，单位：秒
-        private const string TorqueAckTimeoutModeAlarmAndWait = "报警并等待ACK";    // PLC接收扭力超时后弹出阻塞报警
-        private const string TorqueAckTimeoutModeBackgroundWait = "后台等待ACK";   // PLC接收扭力超时后只记录日志并后台等待
+        private const string DefaultTorqueAckTimeoutSeconds = "3";           // PLC接收扭力ACK默认超时时间，单位：秒
+        private const string TorqueAckTimeoutModeResetAndAlarm = "超时清Req并报警"; // PLC接收扭力ACK超时后清零Req并提示异常
         private const int MinMesSaveResultTimeoutSeconds = 5;                // 过小会导致现场网络抖动时误判超时
         private const int MaxMesSaveResultTimeoutSeconds = 300;              // 过大会导致同步过站模式长时间阻塞
+        private const int MinTorqueAckTimeoutSeconds = 1;                    // 过小会导致PLC扫描周期抖动时误判ACK超时
+        private const int MaxTorqueAckTimeoutSeconds = 60;                   // 过大会导致扭力转发锁长时间占用
         private const int TorqueAckInitialTimeoutMs = 3000;                  // PLC接收扭力ACK初始等待时间
         private const int TorqueAckPollIntervalMs = 50;                      // ACK轮询间隔，避免错过PLC短暂置位
         private const int WeightMesStatusCacheLoadDays = 7;                  // 启动时加载最近Weight MES状态，覆盖周末和短期停机重启
@@ -4666,7 +4668,7 @@ namespace MesDatas.Views
             short result = data.TighteningStatus ? (short)3 : (short)2; // 3=OK, 2=NG
             string transferId = BuildTorqueTransferId(context.ProcessName);
             string resultText = data.TighteningStatus ? "OK" : "NG";
-            string timeoutMode = GetTorqueAckTimeoutMode();
+            int ackTimeoutMs = GetTorqueAckTimeoutMs();
 
             try
             {
@@ -4696,9 +4698,15 @@ namespace MesDatas.Views
                 }
 
                 SetTorqueAckWaitingState(context.ProcessName, true);
-                AppendLog(context.ProcessName, $"[转发请求] TransferId={transferId}，扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}");
+                AppendLog(context.ProcessName, $"[转发请求] TransferId={transferId}，扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}，超时={ackTimeoutMs}ms");
 
-                var ackResult = await WaitForTorqueAckAsync(context, transferId, val, resultText, timeoutMode);
+                var ackResult = await WaitForTorqueAckAsync(context, ackTimeoutMs);
+                if (!ackResult.IsAckReceived)
+                {
+                    HandleTorqueAckTimeoutAndResetRequest(context, transferId, val, resultText, ackTimeoutMs, ackResult.LastAckValue, ackResult.ElapsedMs, ackResult.FailedReadCount);
+                    return;
+                }
+
                 AppendLog(context.ProcessName, $"PLC ACK已收到，TransferId={transferId}，Ack={context.AckAddress}当前值={ackResult.LastAckValue}，等待耗时={ackResult.ElapsedMs}ms");
 
                 await WaitForTorqueAckResetAsync(context, transferId);
@@ -4715,11 +4723,12 @@ namespace MesDatas.Views
         }
 
         /// <summary>
-        /// 读取当前配置的 PLC ACK 超时处理模式。
+        /// 获取 PLC 接收扭力 ACK 超时时间，单位：毫秒。
         /// </summary>
-        private string GetTorqueAckTimeoutMode()
+        private int GetTorqueAckTimeoutMs()
         {
-            return NormalizeTorqueAckTimeoutMode(cboTorqueAckTimeoutMode.GetPropertySafely(c => c.Text));
+            string secondsText = NormalizeTorqueAckTimeoutSeconds(txtTorqueAckTimeoutSeconds.GetPropertySafely(c => c.Text));
+            return int.Parse(secondsText) * 1000;
         }
 
         /// <summary>
@@ -4774,78 +4783,98 @@ namespace MesDatas.Views
         }
 
         /// <summary>
-        /// 等待PLC将ACK置为1。初始3秒超时后只按配置报警或记录日志，不复位Req、不重发数据。
+        /// 等待PLC将ACK置为1。超过配置时间后返回失败，由调用方清零Req并忽略本次转发。
         /// </summary>
-        private async Task<(short LastAckValue, long ElapsedMs, int FailedReadCount)> WaitForTorqueAckAsync(
+        private async Task<(bool IsAckReceived, short LastAckValue, long ElapsedMs, int FailedReadCount)> WaitForTorqueAckAsync(
             TorquePlcContext context,
-            string transferId,
-            int torqueValue,
-            string resultText,
-            string timeoutMode)
+            int timeoutMs)
         {
             Stopwatch watch = Stopwatch.StartNew();
-            bool timeoutHandled = false;
             short lastAckValue = -1;
             int failedReadCount = 0;
 
-            while (true)
+            while (watch.ElapsedMilliseconds < timeoutMs)
             {
                 var readResult = await ReadTorqueAckValueAsync(context.AckAddress);
                 if (readResult.IsSuccess)
                 {
                     lastAckValue = readResult.Value;
                     if (readResult.Value == 1)
-                        return (lastAckValue, watch.ElapsedMilliseconds, failedReadCount);
+                        return (true, lastAckValue, watch.ElapsedMilliseconds, failedReadCount);
                 }
                 else
                 {
                     failedReadCount++;
                 }
 
-                if (!timeoutHandled && watch.ElapsedMilliseconds >= TorqueAckInitialTimeoutMs)
-                {
-                    HandleTorqueAckTimeout(context, transferId, torqueValue, resultText, timeoutMode, lastAckValue, watch.ElapsedMilliseconds, failedReadCount);
-                    timeoutHandled = true;
-                }
-
                 await Task.Delay(TorqueAckPollIntervalMs);
             }
+
+            return (false, lastAckValue, watch.ElapsedMilliseconds, failedReadCount);
         }
 
         /// <summary>
-        /// ACK初始等待超时后的提示策略。
+        /// ACK等待超时后，上报异常并清零Req，避免本次扭力转发继续占用握手位。
         /// </summary>
-        private void HandleTorqueAckTimeout(
+        private void HandleTorqueAckTimeoutAndResetRequest(
             TorquePlcContext context,
             string transferId,
             int torqueValue,
             string resultText,
-            string timeoutMode,
+            int timeoutMs,
             short lastAckValue,
             long elapsedMs,
             int failedReadCount)
         {
             string message = string.Format(
-                "[{0}] PLC接收扭力超时，模式={1}，TransferId={2}，扭力={3}，结果={4}，Req={5}保持1，Ack={6}当前值={7}，已等待={8}ms，读取失败次数={9}",
+                "[{0}] 扭力ACK超时，TransferId={1}，扭力={2}，结果={3}，Req={4}，Ack={5}当前值={6}，配置超时={7}ms，实际等待={8}ms，读取失败次数={9}，已忽略本次转发",
                 context.ProcessName,
-                timeoutMode,
                 transferId,
                 torqueValue,
                 resultText,
                 context.RequestAddress,
                 context.AckAddress,
                 lastAckValue,
+                timeoutMs,
                 elapsedMs,
                 failedReadCount);
 
-            if (timeoutMode == TorqueAckTimeoutModeBackgroundWait)
-            {
-                AppendLog(context.ProcessName, $"{message}，已暂停后续扭力转发并继续等待PLC ACK");
-                return;
-            }
-
+            // 扭力ACK超时属于现场需要立即看到的异常，不走错误队列，直接刷新主异常提示。
+            lblStatusErrorTip.ExecuteSafely(c => { c.Text = message; c.ForeColor = Color.Red; });
+            rtbErrorLog.AppendToComponent(message);
             AppendLog(context.ProcessName, message);
-            HandleError(null, null, true, $"[{context.ProcessName}] PLC接收扭力超时，已暂停并等待PLC ACK", message);
+
+            Log4netHelper.LogDataException("TORQUE_FORWARD_ACK_TIMEOUT", message, new Dictionary<string, object>
+            {
+                { "process", context.ProcessName },
+                { "transferId", transferId },
+                { "torque", torqueValue },
+                { "result", resultText },
+                { "requestAddress", context.RequestAddress },
+                { "ackAddress", context.AckAddress },
+                { "lastAckValue", lastAckValue },
+                { "timeoutMs", timeoutMs },
+                { "elapsedMs", elapsedMs },
+                { "failedReadCount", failedReadCount }
+            });
+
+            bool requestCleared = TryWriteInt16(context.RequestAddress, 0, failReson: "扭力转发ACK超时清零Req");
+            string resetMessage = requestCleared
+                ? $"[{context.ProcessName}] 扭力ACK超时处理完成，TransferId={transferId}，Req已清零，已忽略本次转发"
+                : $"[{context.ProcessName}] 扭力ACK超时后Req清零失败，TransferId={transferId}，Req={context.RequestAddress}";
+
+            AppendLog(context.ProcessName, resetMessage);
+            if (!requestCleared)
+            {
+                lblStatusErrorTip.ExecuteSafely(c => { c.Text = resetMessage; c.ForeColor = Color.Red; });
+                rtbErrorLog.AppendToComponent(resetMessage);
+                Log4netHelper.LogDataException("TORQUE_FORWARD_ACK_TIMEOUT_REQ_RESET_FAILED", resetMessage, new Dictionary<string, object>
+                {
+                    { "process", context.ProcessName },
+                    { "transferId", transferId },
+                    { "requestAddress", context.RequestAddress }
+                });
+            }
         }
 
         /// <summary>
@@ -5303,6 +5332,7 @@ namespace MesDatas.Views
         public void Load_ProductConfig()
         {
             systemInfo.MesSaveResultTimeoutSeconds = NormalizeMesSaveResultTimeoutSeconds(systemInfo.MesSaveResultTimeoutSeconds);
+            systemInfo.TorqueAckTimeoutSeconds = NormalizeTorqueAckTimeoutSeconds(systemInfo.TorqueAckTimeoutSeconds);
             HttpClientUtil.ConfigureSaveResultTimeoutSeconds(systemInfo.MesSaveResultTimeoutSeconds);
 
             // -------- 保存后生效 --------
@@ -5314,6 +5344,7 @@ namespace MesDatas.Views
             HeartbeatUploadRate.Text = systemInfo.HeartRate;                    // 心跳上传频率
             RealtimeArgsUploadRate.Text = systemInfo.RealTimeParamRate;         // 实时参数上传频率
             txtMesSaveResultTimeoutSeconds.Text = systemInfo.MesSaveResultTimeoutSeconds; // MES过站接口超时时间
+            txtTorqueAckTimeoutSeconds.Text = systemInfo.TorqueAckTimeoutSeconds; // PLC接收扭力ACK超时时间
 
             systemInfo.TorqueAckTimeoutMode = NormalizeTorqueAckTimeoutMode(systemInfo.TorqueAckTimeoutMode);
             cboTorqueAckTimeoutMode.Text = systemInfo.TorqueAckTimeoutMode;      // PLC接收扭力ACK超时处理方式
@@ -6710,7 +6741,9 @@ namespace MesDatas.Views
         private void SaveAtProductConfig_Click(object sender, EventArgs e)
         {
             string mesTimeoutSeconds = NormalizeMesSaveResultTimeoutSeconds(txtMesSaveResultTimeoutSeconds.Text);
+            string torqueAckTimeoutSeconds = NormalizeTorqueAckTimeoutSeconds(txtTorqueAckTimeoutSeconds.Text);
             txtMesSaveResultTimeoutSeconds.Text = mesTimeoutSeconds;
+            txtTorqueAckTimeoutSeconds.Text = torqueAckTimeoutSeconds;
 
             // -------- 保存后生效 --------
             systemInfo.ReportMachineStatus = EnableReportMachineStatus.Checked; // 勾选启用设备状态上传
@@ -6721,6 +6754,7 @@ namespace MesDatas.Views
             systemInfo.HeartRate = HeartbeatUploadRate.Text;                    // 心跳上传频率
             systemInfo.RealTimeParamRate = RealtimeArgsUploadRate.Text;         // 实时参数上传频率
             systemInfo.MesSaveResultTimeoutSeconds = NormalizeMesSaveResultTimeoutSeconds(mesTimeoutSeconds); // MES过站接口超时时间
+            systemInfo.TorqueAckTimeoutSeconds = NormalizeTorqueAckTimeoutSeconds(torqueAckTimeoutSeconds); // PLC接收扭力ACK超时时间
 
             systemInfo.TorqueAckTimeoutMode = NormalizeTorqueAckTimeoutMode(cboTorqueAckTimeoutMode.Text);
             cboTorqueAckTimeoutMode.Text = systemInfo.TorqueAckTimeoutMode;
@@ -6776,15 +6810,29 @@ namespace MesDatas.Views
         }
 
         /// <summary>
+        /// 规范化 PLC 接收扭力 ACK 超时时间。
+        /// <para>用户输入为空或非法时使用默认 3 秒，并限制在 1-60 秒之间。</para>
+        /// </summary>
+        private static string NormalizeTorqueAckTimeoutSeconds(string timeoutSecondsText)
+        {
+            if (!int.TryParse(timeoutSecondsText, out int timeoutSeconds))
+                timeoutSeconds = int.Parse(DefaultTorqueAckTimeoutSeconds);
+
+            if (timeoutSeconds < MinTorqueAckTimeoutSeconds)
+                timeoutSeconds = MinTorqueAckTimeoutSeconds;
+            else if (timeoutSeconds > MaxTorqueAckTimeoutSeconds)
+                timeoutSeconds = MaxTorqueAckTimeoutSeconds;
+
+            return timeoutSeconds.ToString();
+        }
+
+        /// <summary>
         /// 规范化 PLC 接收扭力 ACK 超时处理模式。
-        /// <para>旧数据库字段为空或出现未知值时，使用更安全的“报警并等待ACK”。</para>
+        /// <para>旧数据库中的“报警并等待ACK/后台等待ACK”统一升级为“超时清Req并报警”。</para>
         /// </summary>
         private static string NormalizeTorqueAckTimeoutMode(string mode)
         {
-            if (string.Equals(mode, TorqueAckTimeoutModeBackgroundWait, StringComparison.Ordinal))
-                return TorqueAckTimeoutModeBackgroundWait;
-
-            return TorqueAckTimeoutModeAlarmAndWait;
+            return TorqueAckTimeoutModeResetAndAlarm;
         }
 
         /// <summary>

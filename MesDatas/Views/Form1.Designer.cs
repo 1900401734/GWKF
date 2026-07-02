@@ -125,6 +125,8 @@ namespace MesDatas.Views
             this.BarcodeRule = new System.Windows.Forms.TextBox();
             this.txtMesSaveResultTimeoutSeconds = new System.Windows.Forms.TextBox();
             this.labelMesSaveResultTimeoutSeconds = new System.Windows.Forms.Label();
+            this.txtTorqueAckTimeoutSeconds = new System.Windows.Forms.TextBox();
+            this.labelTorqueAckTimeoutSeconds = new System.Windows.Forms.Label();
             this.label19 = new System.Windows.Forms.Label();
             this.EnableReportConfigParam = new System.Windows.Forms.CheckBox();
             this.EnableReportRealTimeParam = new System.Windows.Forms.CheckBox();
@@ -1680,10 +1682,12 @@ namespace MesDatas.Views
             this.tlpProductConfig.TabIndex = 0;
             // 
             // groupBox13
-            // 
+            //
             this.groupBox13.Controls.Add(this.BarcodeRule);
             this.groupBox13.Controls.Add(this.txtMesSaveResultTimeoutSeconds);
             this.groupBox13.Controls.Add(this.labelMesSaveResultTimeoutSeconds);
+            this.groupBox13.Controls.Add(this.txtTorqueAckTimeoutSeconds);
+            this.groupBox13.Controls.Add(this.labelTorqueAckTimeoutSeconds);
             this.groupBox13.Controls.Add(this.label19);
             this.groupBox13.Controls.Add(this.EnableReportConfigParam);
             this.groupBox13.Controls.Add(this.EnableReportRealTimeParam);
@@ -1732,6 +1736,27 @@ namespace MesDatas.Views
             this.labelMesSaveResultTimeoutSeconds.Size = new System.Drawing.Size(189, 24);
             this.labelMesSaveResultTimeoutSeconds.TabIndex = 71;
             this.labelMesSaveResultTimeoutSeconds.Text = "MES过站超时(单位: s):";
+            //
+            // txtTorqueAckTimeoutSeconds
+            //
+            this.txtTorqueAckTimeoutSeconds.Location = new System.Drawing.Point(256, 260);
+            this.txtTorqueAckTimeoutSeconds.Margin = new System.Windows.Forms.Padding(2);
+            this.txtTorqueAckTimeoutSeconds.Name = "txtTorqueAckTimeoutSeconds";
+            this.txtTorqueAckTimeoutSeconds.Size = new System.Drawing.Size(166, 30);
+            this.txtTorqueAckTimeoutSeconds.TabIndex = 72;
+            this.txtTorqueAckTimeoutSeconds.Text = "3";
+            this.txtTorqueAckTimeoutSeconds.KeyPress += new System.Windows.Forms.KeyPressEventHandler(this.OnlyAllowDigital_KeyPress);
+            //
+            // labelTorqueAckTimeoutSeconds
+            //
+            this.labelTorqueAckTimeoutSeconds.AutoSize = true;
+            this.labelTorqueAckTimeoutSeconds.ImeMode = System.Windows.Forms.ImeMode.NoControl;
+            this.labelTorqueAckTimeoutSeconds.Location = new System.Drawing.Point(26, 263);
+            this.labelTorqueAckTimeoutSeconds.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.labelTorqueAckTimeoutSeconds.Name = "labelTorqueAckTimeoutSeconds";
+            this.labelTorqueAckTimeoutSeconds.Size = new System.Drawing.Size(199, 24);
+            this.labelTorqueAckTimeoutSeconds.TabIndex = 73;
+            this.labelTorqueAckTimeoutSeconds.Text = "扭力ACK超时(单位: s):";
             // 
             // label19
             // 
@@ -2119,8 +2144,7 @@ namespace MesDatas.Views
             this.cboTorqueAckTimeoutMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cboTorqueAckTimeoutMode.FormattingEnabled = true;
             this.cboTorqueAckTimeoutMode.Items.AddRange(new object[] {
-            "报警并等待ACK",
-            "后台等待ACK"});
+            "超时清Req并报警"});
             this.cboTorqueAckTimeoutMode.Location = new System.Drawing.Point(571, 254);
             this.cboTorqueAckTimeoutMode.Name = "cboTorqueAckTimeoutMode";
             this.cboTorqueAckTimeoutMode.Size = new System.Drawing.Size(157, 31);
@@ -7422,6 +7446,8 @@ namespace MesDatas.Views
         private TextBox BarcodeRule;
         private TextBox txtMesSaveResultTimeoutSeconds;
         private Label labelMesSaveResultTimeoutSeconds;
+        private TextBox txtTorqueAckTimeoutSeconds;
+        private Label labelTorqueAckTimeoutSeconds;
         private GroupBox groupBox12;
         private Label label21;
         private ComboBox cboProductMode;
