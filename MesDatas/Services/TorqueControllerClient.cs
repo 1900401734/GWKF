@@ -18,6 +18,10 @@ namespace MesDatas.Services
 
     public class TorqueControllerClient
     {
+        private const int InitialReconnectDelayMs = 1000;       // 首次连接失败后等待1秒再重连
+        private const int MaxReconnectDelayMs = 10000;          // 指数退避最大间隔10秒，避免现场长时间无人恢复
+        private const int TorqueNoDataSummaryIntervalSeconds = 30; // 已连接但没有收到0061扭力数据时，周期性输出诊断摘要
+        private const int PacketSummaryMaxLength = 180;            // 原始报文摘要最大长度，避免现场日志被长报文刷爆
         private TcpClient _client;
         private NetworkStream _stream;
         private CancellationTokenSource _cts;
@@ -39,6 +43,8 @@ namespace MesDatas.Services
 
         // 看门狗时间戳
         private DateTime _lastReceiveTime;
+        private DateTime _lastTorqueDataReceiveTime;
+        private DateTime _lastNoTorqueDataSummaryTime;
 
         public TorqueControllerClient(string ip, int port = 4545)
         {
@@ -134,6 +140,7 @@ namespace MesDatas.Services
                 await _mid0005Tcs.Task;
 
                 // --- 阶段 4：完全就绪 ---
+                ResetTorqueReceiveDiagnostics();
                 SetConnectionStatus(true, "通讯建立且订阅成功");
                 //OnLog?.Invoke($"已连接电批 {_ip} 并完成数据订阅");
 
@@ -217,36 +224,51 @@ namespace MesDatas.Services
 
                 // 定时发送心跳保活。如果发送超时或报错，SendAsync 会抛出异常从而中断看门狗并重连
                 await SendAsync("00209999001000000000", token);
+
+                ReportNoTorqueDataIfNeeded();
             }
         }
 
         private void ProcessMessage(string msg)
         {
-            if (msg.Length < 8) return;
+            if (msg.Length < 8)
+            {
+                OnLog?.Invoke($"收到短报文，Length={msg.Length}，Raw={BuildPacketSummary(msg)}", false);
+                return;
+            }
+
             string mid = msg.Substring(4, 4);
 
             switch (mid)
             {
                 case "0002":
+                    LogNonHeartbeatPacket(mid, msg);
                     OnLog?.Invoke("<< 收到通讯确认 (MID 0002)", false);
                     _mid0002Tcs?.TrySetResult(true);
                     break;
                 case "0004":
+                    LogNonHeartbeatPacket(mid, msg);
                     OnLog?.Invoke($"<< 命令错误被拒绝 (MID 0004): {msg}", false);
                     // 如果在订阅期间收到0004，向任务抛出异常，直接中断连接重来
                     _mid0005Tcs?.TrySetException(new Exception("控制器拒绝了订阅请求 (返回 MID 0004)"));
                     break;
                 case "0005":
+                    LogNonHeartbeatPacket(mid, msg);
                     OnLog?.Invoke("<< 订阅成功 (MID 0005)", false);
                     _mid0005Tcs?.TrySetResult(true);
                     break;
                 case "0061":
+                    _lastTorqueDataReceiveTime = DateTime.Now;
+                    OnLog?.Invoke($"收到扭力原始报文 MID 0061，Length={msg.Length}，Raw={BuildPacketSummary(msg)}", false);
                     // 收到数据后立即异步回复ACK，不阻塞接收循环
                     _ = SendAsync("00200062001000000000", _cts.Token);
                     ParseTorqueData(msg);
                     break;
                 case "9999":
                     // 收到心跳回复，仅用于刷新时间戳 (在 ReceiveLoop 已刷新)
+                    break;
+                default:
+                    OnLog?.Invoke($"收到未处理 MID {mid}，Length={msg.Length}，Raw={BuildPacketSummary(msg)}", false);
                     break;
             }
         }
@@ -270,12 +292,58 @@ namespace MesDatas.Services
                 data.Torque = rawData.Substring(140, 6);
                 data.TimeStamp = rawData.Substring(176, 19);
 
+                OnLog?.Invoke($"扭力报文解析成功，Torque={data.Torque}，Min={data.TorqueMin}，Max={data.TorqueMax}，Result={(data.TighteningStatus ? "OK" : "NG")}，Time={data.TimeStamp}", false);
                 OnTorqueDataReceived?.Invoke(data);
             }
             catch (Exception ex)
             {
                 OnLog?.Invoke($"解析错误: {ex.Message}", true);
             }
+        }
+
+        /// <summary>
+        /// 连接订阅成功后重置扭力接收诊断时间。
+        /// </summary>
+        private void ResetTorqueReceiveDiagnostics()
+        {
+            _lastTorqueDataReceiveTime = DateTime.Now;
+            _lastNoTorqueDataSummaryTime = DateTime.Now;
+        }
+
+        /// <summary>
+        /// 周期性提示控制器已连接但没有收到扭力数据，方便判断控制器是否未发送0061。
+        /// </summary>
+        private void ReportNoTorqueDataIfNeeded()
+        {
+            if (!IsConnected) return;
+
+            DateTime now = DateTime.Now;
+            if ((now - _lastTorqueDataReceiveTime).TotalSeconds < TorqueNoDataSummaryIntervalSeconds) return;
+            if ((now - _lastNoTorqueDataSummaryTime).TotalSeconds < TorqueNoDataSummaryIntervalSeconds) return;
+
+            _lastNoTorqueDataSummaryTime = now;
+            OnLog?.Invoke($"已连接但未收到 MID 0061 扭力数据，距上次0061={Math.Round((now - _lastTorqueDataReceiveTime).TotalSeconds)}秒", false);
+        }
+
+        /// <summary>
+        /// 记录非心跳控制器报文摘要。
+        /// </summary>
+        private void LogNonHeartbeatPacket(string mid, string msg)
+        {
+            OnLog?.Invoke($"收到控制器报文 MID {mid}，Length={msg.Length}，Raw={BuildPacketSummary(msg)}", false);
+        }
+
+        /// <summary>
+        /// 构造有长度限制的原始报文摘要，避免日志过长。
+        /// </summary>
+        private static string BuildPacketSummary(string packet)
+        {
+            if (string.IsNullOrEmpty(packet)) return string.Empty;
+
+            string normalized = packet.Replace("\0", "\\0").Replace("\r", "\\r").Replace("\n", "\\n");
+            if (normalized.Length <= PacketSummaryMaxLength) return normalized;
+
+            return normalized.Substring(0, PacketSummaryMaxLength) + "...";
         }
 
         private void SetConnectionStatus(bool status, string msg)

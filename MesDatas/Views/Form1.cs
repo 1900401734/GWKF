@@ -4530,18 +4530,19 @@ namespace MesDatas.Views
 
             _clientScanAssy.OnLog += (msg, isErrorLog) =>
             {
-                AppendLog(ProcessName.Scan_ASSY, msg);
                 if (isErrorLog)
                 {
-                    Log4netHelper.LogDataException("TORQUE_CONTROLLER_ERROR", msg, new Dictionary<string, object>
-                    {
-                        { "process", ProcessName.Scan_ASSY }
-                    });
+                    ReportTorqueControllerCommunicationError(ProcessName.Scan_ASSY, msg);
+                }
+                else
+                {
+                    AppendLog(ProcessName.Scan_ASSY, msg);
                 }
             };
 
             _clientScanAssy.OnTorqueDataReceived += (data) =>
             {
+                AppendLog(ProcessName.Scan_ASSY, BuildTorqueForwardReadyMessage(data));
                 Task.Run(async () => await ForwardTorqueToPlcAsync(ProcessName.Scan_ASSY, data));
             };
 
@@ -4562,18 +4563,19 @@ namespace MesDatas.Views
 
             _clientScrewBa.OnLog += (msg, isErrorLog) =>
             {
-                AppendLog(ProcessName.Screw_BA, msg);
                 if (isErrorLog)
                 {
-                    Log4netHelper.LogDataException("TORQUE_CONTROLLER_ERROR", msg, new Dictionary<string, object>
-                    {
-                        { "process", ProcessName.Screw_BA }
-                    });
+                    ReportTorqueControllerCommunicationError(ProcessName.Screw_BA, msg);
+                }
+                else
+                {
+                    AppendLog(ProcessName.Screw_BA, msg);
                 }
             };
 
             _clientScrewBa.OnTorqueDataReceived += (data) =>
             {
+                AppendLog(ProcessName.Screw_BA, BuildTorqueForwardReadyMessage(data));
                 Task.Run(async () => await ForwardTorqueToPlcAsync(ProcessName.Screw_BA, data));
             };
 
@@ -4995,6 +4997,38 @@ namespace MesDatas.Views
                 { "reason", result.Message }
             });
             return false;
+        }
+
+        /// <summary>
+        /// 上报扭力控制器通讯异常。
+        /// <para>控制器断线后，PLC互锁信号仍由 TorqueInterlockMonitorLoopAsync 负责写入禁止状态。</para>
+        /// </summary>
+        private void ReportTorqueControllerCommunicationError(ProcessName processName, string message)
+        {
+            string safeMessage = string.IsNullOrWhiteSpace(message) ? "未知通讯异常" : message;
+            string userMessage = $"[{processName}] 扭力控制器通讯异常：{safeMessage}";
+
+            // 通讯异常需要稳定显示在主异常栏，便于操作员直接看到停线原因。
+            lblStatusErrorTip.ExecuteSafely(c => { c.Text = userMessage; c.ForeColor = Color.Red; });
+            rtbErrorLog.AppendToComponent(userMessage);
+            AppendLog(processName, userMessage);
+
+            Log4netHelper.LogDataException("TORQUE_CONTROLLER_COMMUNICATION_ERROR", userMessage, new Dictionary<string, object>
+            {
+                { "process", processName },
+                { "message", safeMessage }
+            });
+        }
+
+        /// <summary>
+        /// 生成扭力数据进入窗体层后的诊断日志，证明程序已收到解析后的数据。
+        /// </summary>
+        private static string BuildTorqueForwardReadyMessage(TorqueData data)
+        {
+            if (data == null) return "程序已收到空扭力数据，准备转发PLC前已拦截";
+
+            string resultText = data.TighteningStatus ? "OK" : "NG";
+            return $"程序已收到扭力数据，准备转发PLC，Torque={data.Torque}，Min={data.TorqueMin}，Max={data.TorqueMax}，Result={resultText}，Time={data.TimeStamp}";
         }
 
         // 辅助方法
