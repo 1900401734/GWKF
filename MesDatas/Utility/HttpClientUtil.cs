@@ -82,11 +82,12 @@ namespace MesDatas.Utility
         #region 静态 HttpClient 单例及全局网络优化
         // 【核心优化1】HttpClient 必须作为静态单例使用，自带连接池，避免端口耗尽
         private static readonly HttpClient _httpClient;
-        private const int DefaultRequestTimeoutSeconds = 15;
-        public const int DefaultSaveResultTimeoutSeconds = 30;
-        private const int MinSaveResultTimeoutSeconds = 5;
-        private const int MaxSaveResultTimeoutSeconds = 300;
-        private static int _saveResultTimeoutSeconds = DefaultSaveResultTimeoutSeconds;
+        public const int DefaultMesTimeoutSeconds = 30;
+        // 保留旧常量名以兼容历史引用与测试；语义已推广为所有 MES 交互接口的默认超时。
+        public const int DefaultSaveResultTimeoutSeconds = DefaultMesTimeoutSeconds;
+        private const int MinMesTimeoutSeconds = 5;
+        private const int MaxMesTimeoutSeconds = 300;
+        private static int _mesTimeoutSeconds = DefaultMesTimeoutSeconds;
 
         static HttpClientUtil()
         {
@@ -153,31 +154,31 @@ namespace MesDatas.Utility
         }
 
         /// <summary>
-        /// 配置 SAVERESULT 接口超时时间。
+        /// 配置 MES 交互接口超时时间（应用于所有 MES 请求，含 SAVERESULT 与 GetToken 等）。
         /// <para>生产配置保存后会调用这里，让运行中的 MES 请求使用用户设置。</para>
         /// </summary>
         public static void ConfigureSaveResultTimeoutSeconds(string timeoutSecondsText)
         {
             if (!int.TryParse(timeoutSecondsText, out int timeoutSeconds))
-                timeoutSeconds = DefaultSaveResultTimeoutSeconds;
+                timeoutSeconds = DefaultMesTimeoutSeconds;
 
             ConfigureSaveResultTimeoutSeconds(timeoutSeconds);
         }
 
         /// <summary>
-        /// 配置 SAVERESULT 接口超时时间。
+        /// 配置 MES 交互接口超时时间（应用于所有 MES 请求）。
         /// </summary>
         public static void ConfigureSaveResultTimeoutSeconds(int timeoutSeconds)
         {
-            Interlocked.Exchange(ref _saveResultTimeoutSeconds, NormalizeSaveResultTimeoutSeconds(timeoutSeconds));
+            Interlocked.Exchange(ref _mesTimeoutSeconds, NormalizeMesTimeoutSeconds(timeoutSeconds));
         }
 
         /// <summary>
-        /// 获取当前 SAVERESULT 接口超时时间。
+        /// 获取当前 MES 交互接口超时时间。
         /// </summary>
         public static int GetSaveResultTimeoutSeconds()
         {
-            return NormalizeSaveResultTimeoutSeconds(Interlocked.CompareExchange(ref _saveResultTimeoutSeconds, 0, 0));
+            return NormalizeMesTimeoutSeconds(Interlocked.CompareExchange(ref _mesTimeoutSeconds, 0, 0));
         }
 
         public JObject GetResponse(string url, string function, JObject inputParameterJson, string logFile, string responseSelectJsonPath = "//MesServiceJsonResult", int getTokenCount = 0)
@@ -232,7 +233,7 @@ namespace MesDatas.Utility
 
             // 生成 XML 请求体
             string requestXml = GenerateXml(inputParameterJson, function, !getToken, this.token ?? "未获取到token");
-            int timeoutSeconds = IsSaveResultFunction(function) ? GetSaveResultTimeoutSeconds() : DefaultRequestTimeoutSeconds;
+            int timeoutSeconds = GetSaveResultTimeoutSeconds();
             MesLogContext logContext = ExtractMesLogContext(url, function, inputParameterJson, requestXml, retryCount);
 
             string sendTime = DateTime.Now.ToString(timeFormat);
@@ -301,10 +302,10 @@ namespace MesDatas.Utility
             return string.Equals(function, "SAVERESULT", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static int NormalizeSaveResultTimeoutSeconds(int timeoutSeconds)
+        private static int NormalizeMesTimeoutSeconds(int timeoutSeconds)
         {
-            if (timeoutSeconds < MinSaveResultTimeoutSeconds) return MinSaveResultTimeoutSeconds;
-            if (timeoutSeconds > MaxSaveResultTimeoutSeconds) return MaxSaveResultTimeoutSeconds;
+            if (timeoutSeconds < MinMesTimeoutSeconds) return MinMesTimeoutSeconds;
+            if (timeoutSeconds > MaxMesTimeoutSeconds) return MaxMesTimeoutSeconds;
             return timeoutSeconds;
         }
 
