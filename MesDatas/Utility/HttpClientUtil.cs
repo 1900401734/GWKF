@@ -248,51 +248,89 @@ namespace MesDatas.Utility
                 {
                     // 使用 GetAwaiter().GetResult() 来同步等待异步结果，兼容现有老代码架构
                     Stopwatch postWatch = Stopwatch.StartNew();
-                    using (var requestCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+                    string stage = "SEND"; // SEND=发送/连接/TLS阶段, READ=读响应体阶段, PARSE=解析阶段
+                    try
                     {
-                        HttpResponseMessage response = _httpClient.PostAsync(url, content, requestCts.Token).GetAwaiter().GetResult();
-                        postWatch.Stop();
+                        using (var requestCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+                        {
+                            HttpResponseMessage response = _httpClient.PostAsync(url, content, requestCts.Token).GetAwaiter().GetResult();
+                            postWatch.Stop();
+                            stage = "READ";
 
-                        string receiveTime = DateTime.Now.ToString(timeFormat);
+                            string receiveTime = DateTime.Now.ToString(timeFormat);
 
-                        // 读取返回的字符串结果
-                        Stopwatch readWatch = Stopwatch.StartNew();
-                        string recvXml = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                        readWatch.Stop();
+                            // 读取返回的字符串结果
+                            Stopwatch readWatch = Stopwatch.StartNew();
+                            string recvXml = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                            readWatch.Stop();
+                            stage = "PARSE";
 
-                        // 解析为 JObject
-                        Stopwatch parseWatch = Stopwatch.StartNew();
-                        JObject jsonObject = _FromXmlGetJObject(recvXml, responseSelectJsonPath);
-                        parseWatch.Stop();
+                            // 解析为 JObject
+                            Stopwatch parseWatch = Stopwatch.StartNew();
+                            JObject jsonObject = _FromXmlGetJObject(recvXml, responseSelectJsonPath);
+                            parseWatch.Stop();
+                            totalWatch.Stop();
+
+                            logContext.ReceiveTime = receiveTime;
+                            logContext.ElapsedMs = totalWatch.ElapsedMilliseconds;
+                            logContext.HttpStatusCode = ((int)response.StatusCode).ToString();
+                            logContext.Result = jsonObject?["Result"]?.ToString();
+                            logContext.ErrorCode = jsonObject?["ErrorCode"]?.ToString();
+                            logContext.ErrorMessage = jsonObject?["ErrorMessage"]?.ToString();
+                            WriteMesResponseLog(logContext, recvXml, jsonObject);
+
+                            LogProductPassMesDetail(
+                                $"MES请求明细 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} 发送时间={sendTime} 返回时间={receiveTime} " +
+                                $"HTTP耗时={postWatch.ElapsedMilliseconds}ms 响应读取耗时={readWatch.ElapsedMilliseconds}ms " +
+                                $"XML解析耗时={parseWatch.ElapsedMilliseconds}ms 总耗时={totalWatch.ElapsedMilliseconds}ms");
+
+                            return jsonObject;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        if (postWatch.IsRunning) postWatch.Stop();
+                        int sendMs = (int)postWatch.ElapsedMilliseconds;
+                        string errorType = ClassifyMesException(ex, stage);
+                        string failStage = BuildFailStage(stage, sendMs, totalWatch.ElapsedMilliseconds, timeoutSeconds);
+
+                        LastRequestFailure = new MesRequestFailure
+                        {
+                            Function = logContext.Function,
+                            Url = url,
+                            ErrorType = errorType,
+                            FailStage = failStage,
+                            ErrorMessage = ex.Message,
+                            ElapsedMs = totalWatch.ElapsedMilliseconds,
+                            SendMs = sendMs,
+                            TimeoutMs = timeoutSeconds * 1000
+                        };
+
                         totalWatch.Stop();
-
-                        logContext.ReceiveTime = receiveTime;
                         logContext.ElapsedMs = totalWatch.ElapsedMilliseconds;
-                        logContext.HttpStatusCode = ((int)response.StatusCode).ToString();
-                        logContext.Result = jsonObject?["Result"]?.ToString();
-                        logContext.ErrorCode = jsonObject?["ErrorCode"]?.ToString();
-                        logContext.ErrorMessage = jsonObject?["ErrorMessage"]?.ToString();
-                        WriteMesResponseLog(logContext, recvXml, jsonObject);
-
-                        LogProductPassMesDetail(
-                            $"MES请求明细 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} 发送时间={sendTime} 返回时间={receiveTime} " +
-                            $"HTTP耗时={postWatch.ElapsedMilliseconds}ms 响应读取耗时={readWatch.ElapsedMilliseconds}ms " +
-                            $"XML解析耗时={parseWatch.ElapsedMilliseconds}ms 总耗时={totalWatch.ElapsedMilliseconds}ms");
-
-                        return jsonObject;
+                        logContext.TimeoutMs = timeoutSeconds * 1000;
+                        logContext.ErrorType = errorType;
+                        logContext.ErrorMessage = ex.Message;
+                        logContext.FailStage = failStage;
+                        logContext.SendMs = sendMs;
+                        WriteMesExceptionLog(logContext, requestXml, ex);
+                        LogProductPassMesDetail($"MES请求异常 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} ErrorType={errorType} 阶段={failStage} Retry={retryCount} 发送耗时={sendMs}ms 总耗时={totalWatch.ElapsedMilliseconds}ms 异常={ex.Message}");
+                        return null;
                     }
                 }
             }
             catch (Exception ex)
             {
                 totalWatch.Stop();
-                string errorType = ClassifyMesException(ex);
+                string errorType = ClassifyMesException(ex, "SEND");
+                string failStage = BuildFailStage("SEND", (int)totalWatch.ElapsedMilliseconds, totalWatch.ElapsedMilliseconds, timeoutSeconds);
                 logContext.ElapsedMs = totalWatch.ElapsedMilliseconds;
                 logContext.TimeoutMs = timeoutSeconds * 1000;
                 logContext.ErrorType = errorType;
                 logContext.ErrorMessage = ex.Message;
+                logContext.FailStage = failStage;
                 WriteMesExceptionLog(logContext, requestXml, ex);
-                LogProductPassMesDetail($"MES请求异常 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} ErrorType={errorType} Retry={retryCount} 总耗时={totalWatch.ElapsedMilliseconds}ms 异常={ex.Message}");
+                LogProductPassMesDetail($"MES请求异常 Function={logContext.Function} RequestId={logContext.RequestId} Url={url} ErrorType={errorType} 阶段={failStage} Retry={retryCount} 总耗时={totalWatch.ElapsedMilliseconds}ms 异常={ex.Message}");
                 return null;
             }
         }
@@ -309,15 +347,45 @@ namespace MesDatas.Utility
             return timeoutSeconds;
         }
 
-        private static string ClassifyMesException(Exception ex)
-        {
-            if (ex is TaskCanceledException) return "TIMEOUT";
+        /// <summary>
+        /// 最近的 MES 请求失败详情；调用方可据此给出比"接口返回空"更具体的原因。
+        /// </summary>
+        public static MesRequestFailure LastRequestFailure { get; private set; }
 
+        /// <summary>
+        /// 判定超时落在哪一阶段：SEND（发送/连接/TLS） / READ（读响应体） / PARSE（解析）。
+        /// </summary>
+        private static string BuildFailStage(string stageAtFailure, long sendMs, long totalMs, int timeoutSeconds)
+        {
+            // stageAtFailure 为捕获到异常时还在计时的阶段：
+            //   SEND  → PostAsync 未返回（DNS/TCP/TLS/发送超时）
+            //   READ  → 响应头已收到，等待响应体超时
+            //   PARSE → 响应体已读完，解析阶段异常（通常非超时）
+            if (string.Equals(stageAtFailure, "READ", StringComparison.Ordinal))
+                return "读响应超时";
+            if (string.Equals(stageAtFailure, "PARSE", StringComparison.Ordinal))
+                return "解析阶段";
+            // 兜底：发送阶段
+            if (totalMs >= timeoutSeconds * 1000 - 50)
+                return "发送阶段超时";
+            return "发送阶段";
+        }
+
+        private static string ClassifyMesException(Exception ex, string failStage = null)
+        {
+            // 区分 CTS 触发的取消（真超时）来自哪一阶段：
+            //   failStage=READ → 响应读取超时；failStage=SEND/默认 → 发送/连接超时。
             string detail = ex.ToString();
+            if (ex is TaskCanceledException || ex is OperationCanceledException)
+            {
+                return string.Equals(failStage, "READ", StringComparison.Ordinal) ? "TIMEOUT_READ" : "TIMEOUT_SEND";
+            }
             if (detail.IndexOf("remote name could not be resolved", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "DNS_ERROR";
             if (detail.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
-                return "TIMEOUT";
+            {
+                return string.Equals(failStage, "READ", StringComparison.Ordinal) ? "TIMEOUT_READ" : "TIMEOUT_SEND";
+            }
             if (ex is HttpRequestException || detail.IndexOf("WebException", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "CONNECT_ERROR";
             if (ex is JsonException || detail.IndexOf("XmlException", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -363,15 +431,44 @@ namespace MesDatas.Utility
             builder.AppendLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {BuildMesTitle(direction, context)}");
             builder.AppendLine(BuildMesSummary(context, responseJson, exception));
             builder.AppendLine("---- 原始报文开始 ----");
-            builder.AppendLine(rawXml ?? string.Empty);
+            builder.AppendLine(RedactTemplateDataForLog(rawXml) ?? string.Empty);
             builder.AppendLine("---- 原始报文结束 ----");
             builder.AppendLine(string.IsNullOrWhiteSpace(formatError)
                 ? "---- 格式化报文开始 ----"
                 : $"---- 格式化报文开始（格式化失败原因={formatError}） ----");
-            builder.AppendLine(string.IsNullOrWhiteSpace(formattedXml) ? "格式化失败，原始报文已在上方完整保留。" : formattedXml);
+            builder.AppendLine(string.IsNullOrWhiteSpace(formattedXml) ? "格式化失败，原始报文已在上方完整保留。" : RedactTemplateDataForLog(formattedXml));
             builder.AppendLine("---- 格式化报文结束 ----");
             return builder.ToString().TrimEnd();
         }
+
+        /// <summary>
+        /// 裁剪日志中的 TemplateData 字段内容。
+        /// <para>GETPRINTDATA 返回的 TemplateData 是标签模板二进制（base64），可能很大，
+        /// 写入日志会刷屏且无现场价值。这里只保留长度提示，不影响实际业务返回的对象。</para>
+        /// </summary>
+        private static string RedactTemplateDataForLog(string xml)
+        {
+            if (string.IsNullOrEmpty(xml)) return xml;
+
+            try
+            {
+                // 匹配 JSON 形如 "TemplateData":"<很长的base64>"，仅保留长度提示。
+                // base64 文本不会包含未转义的双引号，故用 [^"]* 安全取值。
+                return MesTemplateDataRegex.Replace(
+                    xml,
+                    match => $"\"TemplateData\":\"<已省略,长度={match.Groups[1].Length}>\"");
+            }
+            catch
+            {
+                return xml;
+            }
+        }
+
+        // 预编译正则，避免每次请求重新分析。
+        private static readonly System.Text.RegularExpressions.Regex MesTemplateDataRegex =
+            new System.Text.RegularExpressions.Regex(
+                @"""TemplateData""\s*:\s*""([^""]*)""",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>
         /// 格式化 MES XML，并尝试格式化 XML 内部的 JSON 字符串。
@@ -519,6 +616,10 @@ namespace MesDatas.Utility
                 parts.Add($"Exception={exception.Message}");
                 if (context.TimeoutMs > 0)
                     parts.Add($"TimeoutMs={context.TimeoutMs}");
+                if (!string.IsNullOrWhiteSpace(context.FailStage))
+                    parts.Add($"FailStage={context.FailStage}");
+                if (context.SendMs >= 0)
+                    parts.Add($"SendMs={context.SendMs}");
             }
 
             return string.Join(" ", parts);
@@ -608,6 +709,37 @@ namespace MesDatas.Utility
             public string ErrorCode { get; set; }
             public string ErrorType { get; set; }
             public string ErrorMessage { get; set; }
+            /// <summary>失败阶段（发送阶段超时/读响应超时/解析阶段）</summary>
+            public string FailStage { get; set; }
+            /// <summary>发送/连接阶段耗时（毫秒），用于区分发送与读取超时</summary>
+            public int SendMs { get; set; } = -1;
+        }
+
+        /// <summary>
+        /// 一次 MES 请求失败的详情，供调用方给出具体失败原因。
+        /// </summary>
+        public sealed class MesRequestFailure
+        {
+            public string Function { get; set; }
+            public string Url { get; set; }
+            public string ErrorType { get; set; }
+            public string FailStage { get; set; }
+            public string ErrorMessage { get; set; }
+            public long ElapsedMs { get; set; }
+            public int SendMs { get; set; }
+            public int TimeoutMs { get; set; }
+
+            /// <summary>
+            /// 生成面向现场的人类可读失败原因。
+            /// </summary>
+            public string ToDisplayString()
+            {
+                string fn = string.IsNullOrWhiteSpace(Function) ? "-" : Function;
+                string stage = string.IsNullOrWhiteSpace(FailStage) ? "-" : FailStage;
+                string type = string.IsNullOrWhiteSpace(ErrorType) ? "-" : ErrorType;
+                string msg = string.IsNullOrWhiteSpace(ErrorMessage) ? string.Empty : ErrorMessage;
+                return $"[{fn}] {stage}（ErrorType={type}，耗时={ElapsedMs}ms，发送={SendMs}ms，超时={TimeoutMs}ms）{msg}";
+            }
         }
 
         /// <summary>

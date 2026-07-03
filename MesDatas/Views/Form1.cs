@@ -1865,7 +1865,7 @@ namespace MesDatas.Views
                             }
                             else
                             {
-                                failReason = barCodeParam == null ? "接口返回空" : barCodeParam.ErrorMessage;
+                                failReason = barCodeParam == null ? BuildMesFailReason("打印接口返回空") : barCodeParam.ErrorMessage;
                                 lblRunningStatus.ExecuteSafely(c => { c.Text = $"打印失败: {failReason}"; c.ForeColor = Color.Red; });
                                 PrinterSignal.AppendToComponent($"打印失败: {failReason}");
                                 Log4netHelper.LogLabelPrint("PRINT_DATA_FAIL", failReason, new Dictionary<string, object>
@@ -6104,6 +6104,16 @@ namespace MesDatas.Views
         #endregion
 
         #region ---------- MES接口 ----------
+
+        /// <summary>
+        /// 当 MES 返回 null 时，结合 HttpClientUtil.LastRequestFailure 给出具体的失败原因，
+        /// 避免现场只看到笼统的"接口返回空"。若最近无请求失败记录则退回默认提示。
+        /// </summary>
+        private string BuildMesFailReason(string defaultReason)
+        {
+            var failure = HttpClientUtil.LastRequestFailure;
+            return failure == null ? defaultReason : $"返回空 [{failure.ToDisplayString()}]";
+        }
 
         /// <summary>
         /// 访问接口的统一接口
