@@ -4121,14 +4121,14 @@ namespace MesDatas.Views
                     UpdateWeightMesStatus(uploadEntity?.Name, scannedBarcodeList, MesOutboxStatus.PendingRetry, nullReason, "网络/接口");
                     if (uploadEntity.Name == ProcessName.Weight)
                         NotifyWeightPrintForbidden("Weight过站结果未知，禁止当前条码打印");
-                    // 第7行失败：收到响应为空
+                    // 第7行失败：收到响应为空（含响应头超时时附"可能已落库勿盲目重试"提示）
                     if (handleMesFailure)
-                        trace?.LogFlowFailure("收到过站响应", "接口返回数据异常(Null)");
+                        trace?.LogFlowFailure("收到过站响应", BuildMesFailReason("接口返回数据异常(Null)"));
                     else
                         trace?.Diag("MES_NULL_RETURN", "上传结果接口返回数据异常（null），后台模式只记录，不写PLC NG");
                     if (handleMesFailure)
                     {
-                        HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] 上传结果接口返回数据异常（null）");
+                        HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {BuildMesFailReason("上传结果接口返回数据异常（null）")}");
                     }
                     return null;
                 }
@@ -4822,8 +4822,8 @@ namespace MesDatas.Views
                 elapsedMs,
                 failedReadCount);
 
-            // 扭力ACK超时属于现场需要立即看到的异常，不走错误队列，直接刷新主异常提示。
-            lblStatusErrorTip.ExecuteSafely(c => { c.Text = message; c.ForeColor = Color.Red; });
+            // 只在后台记录异常
+            //lblStatusErrorTip.ExecuteSafely(c => { c.Text = message; c.ForeColor = Color.Red; });
             rtbErrorLog.AppendToComponent(message);
             AppendLog(context.ProcessName, message);
 

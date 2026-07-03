@@ -353,38 +353,40 @@ namespace MesDatas.Utility
         public static MesRequestFailure LastRequestFailure { get; private set; }
 
         /// <summary>
-        /// 判定超时落在哪一阶段：SEND（发送/连接/TLS） / READ（读响应体） / PARSE（解析）。
+        /// 判定超时落在哪一阶段：响应头超时（请求已发，等响应头超时） / 读响应超时 / 解析阶段。
+        /// <para>注意：PostAsync 在拿到响应头前都算"SEND"，但它实际已发送请求体——
+        /// 故此处对 CTS 取消 + 未拿响应头 标为"响应头超时"而非"发送阶段超时"，避免现场误读为"没发出去"。</para>
         /// </summary>
         private static string BuildFailStage(string stageAtFailure, long sendMs, long totalMs, int timeoutSeconds)
         {
             // stageAtFailure 为捕获到异常时还在计时的阶段：
-            //   SEND  → PostAsync 未返回（DNS/TCP/TLS/发送超时）
+            //   SEND  → PostAsync 未返回 = 响应头未在超时内到达（请求体大概率已发出）
             //   READ  → 响应头已收到，等待响应体超时
             //   PARSE → 响应体已读完，解析阶段异常（通常非超时）
             if (string.Equals(stageAtFailure, "READ", StringComparison.Ordinal))
                 return "读响应超时";
             if (string.Equals(stageAtFailure, "PARSE", StringComparison.Ordinal))
                 return "解析阶段";
-            // 兜底：发送阶段
+            // 兜底：响应头阶段（PostAsync 未返回）
             if (totalMs >= timeoutSeconds * 1000 - 50)
-                return "发送阶段超时";
-            return "发送阶段";
+                return "响应头超时";
+            return "响应头阶段";
         }
 
         private static string ClassifyMesException(Exception ex, string failStage = null)
         {
             // 区分 CTS 触发的取消（真超时）来自哪一阶段：
-            //   failStage=READ → 响应读取超时；failStage=SEND/默认 → 发送/连接超时。
+            //   failStage=READ → 响应读取超时；failStage=SEND/默认 → 响应头超时（请求体可能已发出）。
             string detail = ex.ToString();
             if (ex is TaskCanceledException || ex is OperationCanceledException)
             {
-                return string.Equals(failStage, "READ", StringComparison.Ordinal) ? "TIMEOUT_READ" : "TIMEOUT_SEND";
+                return string.Equals(failStage, "READ", StringComparison.Ordinal) ? "TIMEOUT_READ" : "TIMEOUT_RESPONSE_HEADER";
             }
             if (detail.IndexOf("remote name could not be resolved", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "DNS_ERROR";
             if (detail.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                return string.Equals(failStage, "READ", StringComparison.Ordinal) ? "TIMEOUT_READ" : "TIMEOUT_SEND";
+                return string.Equals(failStage, "READ", StringComparison.Ordinal) ? "TIMEOUT_READ" : "TIMEOUT_RESPONSE_HEADER";
             }
             if (ex is HttpRequestException || detail.IndexOf("WebException", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "CONNECT_ERROR";
@@ -738,7 +740,12 @@ namespace MesDatas.Utility
                 string stage = string.IsNullOrWhiteSpace(FailStage) ? "-" : FailStage;
                 string type = string.IsNullOrWhiteSpace(ErrorType) ? "-" : ErrorType;
                 string msg = string.IsNullOrWhiteSpace(ErrorMessage) ? string.Empty : ErrorMessage;
-                return $"[{fn}] {stage}（ErrorType={type}，耗时={ElapsedMs}ms，发送={SendMs}ms，超时={TimeoutMs}ms）{msg}";
+                string detail = $"[{fn}] {stage}（ErrorType={type}，耗时={ElapsedMs}ms，发送={SendMs}ms，超时={TimeoutMs}ms）{msg}";
+
+                // 响应头超时：请求体大概率已发出，MES 可能已落库——提示先查 MES 再决定重试，避免撞"重复过站"。
+                if (string.Equals(ErrorType, "TIMEOUT_RESPONSE_HEADER", StringComparison.Ordinal))
+                    return detail + " | 请求体可能已发送，MES可能已落库，请先查MES再决定是否重试";
+                return detail;
             }
         }
 
