@@ -80,7 +80,6 @@ namespace MesDatas.Utility
                     richTextBox.SelectionStart = 0;
                     var DefaultLogger = $"【{System.DateTime.Now}】" + logMessage + "\n";
                     richTextBox.SelectedText = DefaultLogger;
-                    Log4netHelper.Debug($"流程：{richTextBox.Name} 日志：{DefaultLogger}");
                 }
             }
             catch (Exception ex)
@@ -106,7 +105,8 @@ namespace MesDatas.Utility
         [ThreadStatic]
         private static StringBuilder _logBuilder;
 
-        private const int UiLogBatchSize = 100;
+        private const int UiLogBatchSize = 25;
+        private const int UiLogMaxQueueLength = 500;
         private static readonly object UiLogQueueLock = new object();
         private static readonly Dictionary<RichTextBox, UiLogQueueState> UiLogQueues = new Dictionary<RichTextBox, UiLogQueueState>();
 
@@ -117,6 +117,7 @@ namespace MesDatas.Utility
         {
             public readonly Queue<UiLogItem> Items = new Queue<UiLogItem>();
             public bool IsFlushScheduled;
+            public int? MaxLineCount;
         }
 
         /// <summary>
@@ -126,6 +127,31 @@ namespace MesDatas.Utility
         {
             public string Message { get; set; }
             public int ClearLength { get; set; }
+            /// <summary>原样写入（不加时间戳、不去重），供统一流程日志使用。</summary>
+            public bool IsRaw { get; set; }
+        }
+
+        /// <summary>
+        /// 设置指定日志控件保留的最大行数。
+        /// </summary>
+        public static void SetUiLogLineLimit(this RichTextBox richTextBox, int maxLineCount)
+        {
+            if (richTextBox == null)
+                return;
+
+            if (maxLineCount < 1)
+                throw new ArgumentOutOfRangeException(nameof(maxLineCount));
+
+            lock (UiLogQueueLock)
+            {
+                if (!UiLogQueues.TryGetValue(richTextBox, out UiLogQueueState state))
+                {
+                    state = new UiLogQueueState();
+                    UiLogQueues[richTextBox] = state;
+                }
+
+                state.MaxLineCount = maxLineCount;
+            }
         }
 
         /// <summary>
@@ -139,21 +165,55 @@ namespace MesDatas.Utility
             if (richtextBox == null || richtextBox.IsDisposed)
                 return;
 
+            int maxLineCount = GetUiLogLineLimit(richtextBox, ClearLength);
+            string logMessage = LogMessage ?? string.Empty;
+
             // 跨线程日志先进入队列，再由 UI 线程批量刷新，避免后台业务线程同步等待界面刷新。
             if (richtextBox.InvokeRequired)
             {
-                EnqueueUiLog(richtextBox, LogMessage, ClearLength);
+                EnqueueUiLog(richtextBox, logMessage, maxLineCount);
             }
             else
             {
-                _WriteAppendToComponent(richtextBox, LogMessage, ClearLength);
+                _WriteAppendToComponent(richtextBox, logMessage, maxLineCount);
             }
+        }
+
+        /// <summary>
+        /// 原样追加一行到组件（不加时间戳、不去重），供统一流程日志使用。
+        /// <para>调用方应自行拼好「时间 消息」整行；传入空串即写入一个空行作为流程分隔。</para>
+        /// </summary>
+        public static void AppendRaw(this RichTextBox richtextBox, string line, int clearLength = 2000)
+        {
+            if (richtextBox == null || richtextBox.IsDisposed)
+                return;
+
+            int maxLineCount = GetUiLogLineLimit(richtextBox, clearLength);
+            if (richtextBox.InvokeRequired)
+            {
+                EnqueueUiLog(richtextBox, line ?? string.Empty, maxLineCount, isRaw: true);
+            }
+            else
+            {
+                _WriteRawToComponent(richtextBox, line ?? string.Empty, maxLineCount);
+            }
+        }
+
+        private static int GetUiLogLineLimit(RichTextBox richTextBox, int fallbackLineCount)
+        {
+            lock (UiLogQueueLock)
+            {
+                if (UiLogQueues.TryGetValue(richTextBox, out UiLogQueueState state) && state.MaxLineCount.HasValue)
+                    return state.MaxLineCount.Value;
+            }
+
+            return Math.Max(1, fallbackLineCount);
         }
 
         /// <summary>
         /// 将跨线程日志加入待刷新队列。
         /// </summary>
-        private static void EnqueueUiLog(RichTextBox richTextBox, string logMessage, int clearLength)
+        private static void EnqueueUiLog(RichTextBox richTextBox, string logMessage, int clearLength, bool isRaw = false)
         {
             bool shouldSchedule = false;
 
@@ -165,7 +225,10 @@ namespace MesDatas.Utility
                     UiLogQueues[richTextBox] = state;
                 }
 
-                state.Items.Enqueue(new UiLogItem { Message = logMessage, ClearLength = clearLength });
+                while (state.Items.Count >= UiLogMaxQueueLength)
+                    state.Items.Dequeue();
+
+                state.Items.Enqueue(new UiLogItem { Message = logMessage, ClearLength = clearLength, IsRaw = isRaw });
 
                 if (!state.IsFlushScheduled)
                 {
@@ -214,25 +277,43 @@ namespace MesDatas.Utility
                 return;
             }
 
+            bool queueDrained = false;
             int flushCount = 0;
-            while (flushCount < UiLogBatchSize)
+            richTextBox.SuspendLayout();
+            try
             {
-                UiLogItem item;
-
-                lock (UiLogQueueLock)
+                while (flushCount < UiLogBatchSize)
                 {
-                    if (!UiLogQueues.TryGetValue(richTextBox, out UiLogQueueState state) || state.Items.Count == 0)
+                    UiLogItem item;
+
+                    lock (UiLogQueueLock)
                     {
-                        if (state != null) state.IsFlushScheduled = false;
-                        return;
+                        if (!UiLogQueues.TryGetValue(richTextBox, out UiLogQueueState state) || state.Items.Count == 0)
+                        {
+                            if (state != null)
+                                state.IsFlushScheduled = false;
+
+                            queueDrained = true;
+                            break;
+                        }
+
+                        item = state.Items.Dequeue();
                     }
 
-                    item = state.Items.Dequeue();
+                    if (item.IsRaw)
+                        _WriteRawToComponent(richTextBox, item.Message, item.ClearLength, manageLayout: false);
+                    else
+                        _WriteAppendToComponent(richTextBox, item.Message, item.ClearLength, manageLayout: false);
+                    flushCount++;
                 }
-
-                _WriteAppendToComponent(richTextBox, item.Message, item.ClearLength);
-                flushCount++;
             }
+            finally
+            {
+                richTextBox.ResumeLayout();
+            }
+
+            if (queueDrained)
+                return;
 
             bool hasMore;
             lock (UiLogQueueLock)
@@ -271,81 +352,99 @@ namespace MesDatas.Utility
         /// <param name="richTextBox">目标控件</param>
         /// <param name="logMessage">日志内容</param>
         /// <param name="maxLineCount">最大行数限制</param>
-        private static void _WriteAppendToComponent(RichTextBox richTextBox, string logMessage, int maxLineCount)
+        private static void _WriteAppendToComponent(RichTextBox richTextBox, string logMessage, int maxLineCount, bool manageLayout = true)
         {
             try
             {
-                int lineHeight = richTextBox.Lines.Length;
-
-                // 行数超限，清空后返回
-                if (lineHeight > maxLineCount)
-                {
-                    richTextBox.Clear();
-                    return;
-                }
-
-                // 初始化ThreadStatic的StringBuilder
-                if (_logBuilder == null)
-                {
-                    _logBuilder = new StringBuilder(256);
-                }
-                else
-                {
-                    _logBuilder.Clear();
-                }
-
-                // 构建日志字符串（复用StringBuilder）
-                _logBuilder.Append('【');
-                _logBuilder.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
-                _logBuilder.Append('】');
-                _logBuilder.Append(logMessage);
-                _logBuilder.Append('\n');
-                string formattedLog = _logBuilder.ToString();
-
-                // 判断是否为重复日志
-                if (lineHeight > 0 && richTextBox.Lines[0].EndsWith(logMessage))
-                {
-                    // 查找第一个换行符位置
-                    int newlineIndex = richTextBox.Text.IndexOf('\n');
-                    int length = newlineIndex >= 0 ? newlineIndex + 1 : richTextBox.Text.Length;
-
-                    // 使用SuspendLayout/ResumeLayout减少重绘
+                if (manageLayout)
                     richTextBox.SuspendLayout();
-                    try
-                    {
-                        richTextBox.Select(0, length);
-                        richTextBox.SelectedText = formattedLog;
-                        richTextBox.Select(0, 0);
-                    }
-                    finally
-                    {
-                        richTextBox.ResumeLayout();
-                    }
-                }
-                else
+
+                try
                 {
-                    // 新日志插入到开头
-                    richTextBox.SuspendLayout();
-                    try
+                    int lineCount = GetUiLogLineCount(richTextBox);
+                    if (lineCount >= maxLineCount)
                     {
-                        richTextBox.Select(0, 0);
-                        richTextBox.SelectedText = formattedLog;
-                        richTextBox.Select(0, 0);
-                    }
-                    finally
-                    {
-                        richTextBox.ResumeLayout();
+                        richTextBox.Clear();
+                        lineCount = 0;
                     }
 
-                    // 记录到Log4net
-                    Log4netHelper.Debug($"流程：{richTextBox.Name} 日志：{formattedLog}");
+                    if (_logBuilder == null)
+                        _logBuilder = new StringBuilder(256);
+                    else
+                        _logBuilder.Clear();
+
+                    _logBuilder.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+                    _logBuilder.Append(' ');
+                    _logBuilder.Append(logMessage);
+                    _logBuilder.Append('\n');
+                    string formattedLog = _logBuilder.ToString();
+
+                    int firstLineLength = lineCount > 0 ? GetFirstLineLength(richTextBox) : 0;
+                    bool isDuplicate = false;
+                    if (firstLineLength > 0)
+                    {
+                        richTextBox.Select(0, firstLineLength);
+                        string firstLine = richTextBox.SelectedText.TrimEnd('\r', '\n');
+                        isDuplicate = firstLine.EndsWith(logMessage, StringComparison.Ordinal);
+                    }
+
+                    richTextBox.Select(0, isDuplicate ? firstLineLength : 0);
+                    richTextBox.SelectedText = formattedLog;
+                    richTextBox.Select(0, 0);
+                }
+                finally
+                {
+                    if (manageLayout)
+                        richTextBox.ResumeLayout();
                 }
             }
             catch (Exception)
             {
-                // 建议记录异常信息，避免静默失败
-                // Log4netHelper.Error("写入日志失败", ex);
+                // UI日志写入失败不再自动落盘，避免界面组件异常污染业务功能日志。
             }
+        }
+
+        /// <summary>
+        /// 原样写入一行（不加时间戳、不去重），供统一流程日志使用。
+        /// </summary>
+        private static void _WriteRawToComponent(RichTextBox richTextBox, string line, int maxLineCount, bool manageLayout = true)
+        {
+            try
+            {
+                if (manageLayout)
+                    richTextBox.SuspendLayout();
+
+                try
+                {
+                    if (GetUiLogLineCount(richTextBox) >= maxLineCount)
+                        richTextBox.Clear();
+
+                    richTextBox.Select(0, 0);
+                    richTextBox.SelectedText = line + "\n";
+                    richTextBox.Select(0, 0);
+                }
+                finally
+                {
+                    if (manageLayout)
+                        richTextBox.ResumeLayout();
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private static int GetUiLogLineCount(RichTextBox richTextBox)
+        {
+            return richTextBox.TextLength == 0
+                ? 0
+                : richTextBox.GetLineFromCharIndex(richTextBox.TextLength - 1) + 1;
+        }
+
+        private static int GetFirstLineLength(RichTextBox richTextBox)
+        {
+            int secondLineStart = richTextBox.GetFirstCharIndexFromLine(1);
+            return secondLineStart >= 0 ? secondLineStart : richTextBox.TextLength;
         }
 
         //private readonly object AccessLogLock = new object();
@@ -376,10 +475,9 @@ namespace MesDatas.Utility
                     writer.WriteLine(Content);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // 建议记录异常
-                // Log4netHelper.Error("写入本地日志失败", ex);
+                // 这里是通用txt写入工具，业务侧需要落盘时应显式调用功能日志。
             }
             //}
         }

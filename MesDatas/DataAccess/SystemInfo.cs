@@ -112,6 +112,25 @@ namespace MesDatas.DataAcess
         public string ProductMode { get; set; } = "显示NG且阻塞";
 
         /// <summary>
+        /// MES过站接口超时时间，单位：秒。
+        /// </summary>
+        [SugarColumn(ColumnName = "MesSaveResultTimeoutSeconds", IsNullable = true, ColumnDescription = "MES过站接口超时时间（单位：s）")]
+        public string MesSaveResultTimeoutSeconds { get; set; } = "30";
+
+        /// <summary>
+        /// PLC接收扭力结果超时后的处理方式。
+        /// <para>当前策略：超时清Req并报警，避免本次转发继续占用握手位。</para>
+        /// </summary>
+        [SugarColumn(ColumnName = "TorqueAckTimeoutMode", IsNullable = true, ColumnDescription = "PLC接收扭力结果超时处理方式")]
+        public string TorqueAckTimeoutMode { get; set; } = "超时清Req并报警";
+
+        /// <summary>
+        /// PLC接收扭力ACK超时时间，单位：秒。
+        /// </summary>
+        [SugarColumn(ColumnName = "TorqueAckTimeoutSeconds", IsNullable = true, ColumnDescription = "PLC接收扭力ACK超时时间（单位：s）")]
+        public string TorqueAckTimeoutSeconds { get; set; } = "3";
+
+        /// <summary>
         /// 强制过站
         /// </summary>
         [SugarColumn(ColumnName = "EnforcePass", IsNullable = true, ColumnDescription = "强制过站")]

@@ -273,11 +273,14 @@
     <Compile Include="Models\LoginUserEntity.cs" />
     <Compile Include="Models\MesBasicEntity.cs" />
     <Compile Include="Models\MaxMinValue.cs" />
+    <Compile Include="Models\MesOutboxRecord.cs" />
     <Compile Include="Models\PrintBarCodeEntity.cs" />
+    <Compile Include="Models\ProductUploadSnapshot.cs" />
     <Compile Include="Models\ReadPictureEntity.cs" />
     <Compile Include="Models\SendResultEntity.cs" />
     <Compile Include="Models\TokenEntity.cs" />
     <Compile Include="Models\UploadManagerEntity.cs" />
+    <Compile Include="Models\WeightMesStatusRecord.cs" />
     <Compile Include="Views\Form1.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -319,6 +322,8 @@
     <Compile Include="DataAccess\SugType.cs" />
     <Compile Include="DataAccess\TypeSugarClass.cs" />
     <Compile Include="Services\PLCAdress.cs" />
+    <Compile Include="Services\MesOutboxStore.cs" />
+    <Compile Include="Services\WeightMesStatusStore.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\ResourceManager.cs" />
