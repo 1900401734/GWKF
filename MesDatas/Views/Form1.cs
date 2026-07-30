@@ -43,6 +43,7 @@ namespace MesDatas.Views
         private const int TorqueAckPollIntervalMs = 50;                      // ACK轮询间隔，避免错过PLC短暂置位
         private const int WeightMesStatusCacheLoadDays = 7;                  // 启动时加载最近Weight MES状态，覆盖周末和短期停机重启
         private const int WeightMesStatusCacheRetentionDays = 30;            // 轻量缓存保留天数，避免本地文件长期堆积
+        private const int ProductionUiLogMaxLines = 500;                       // 限制生产日志控件体积，避免切页和重绘卡顿
         private Assembly assembly;
         private ResourceManager resources;
         private PlcAddressInfo addrInfo;
@@ -95,6 +96,10 @@ namespace MesDatas.Views
             WindowState = FormWindowState.Maximized;
 
             InitializeComponent();
+
+            rtbReadBarCode.SetUiLogLineLimit(ProductionUiLogMaxLines);
+            UploadMes.SetUiLogLineLimit(ProductionUiLogMaxLines);
+            PrinterSignal.SetUiLogLineLimit(ProductionUiLogMaxLines);
 
             // 注册统一流程日志的 UI 输出槽：过站流程行同时落 UI 与产品过站文件，逐字一致。
             ProductPassTraceContext.UiSink = line => UploadMes.AppendRaw(line);
