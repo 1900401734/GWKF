@@ -532,6 +532,17 @@ namespace MesDatas.Views
             this.label141 = new System.Windows.Forms.Label();
             this.label137 = new System.Windows.Forms.Label();
             this.label11 = new System.Windows.Forms.Label();
+            this.txtPlcTestAddress = new System.Windows.Forms.TextBox();
+            this.panel10 = new System.Windows.Forms.Panel();
+            this.btnRead = new System.Windows.Forms.Button();
+            this.grpPlcTest = new System.Windows.Forms.GroupBox();
+            this.txtPlcTestResult = new System.Windows.Forms.TextBox();
+            this.txtPlcTestStringLength = new System.Windows.Forms.TextBox();
+            this.lblPlcTestStringLength = new System.Windows.Forms.Label();
+            this.lblPoint = new System.Windows.Forms.Label();
+            this.lblResult = new System.Windows.Forms.Label();
+            this.lblType = new System.Windows.Forms.Label();
+            this.cmbType = new System.Windows.Forms.ComboBox();
             this.tabPage9.SuspendLayout();
             this.tableLayoutPanel13.SuspendLayout();
             this.groupBox23.SuspendLayout();
@@ -657,6 +668,8 @@ namespace MesDatas.Views
             this.panelTorqueMonitor2.SuspendLayout();
             this.tlpTorqueMeter2.SuspendLayout();
             this.grpTorqueMonitor2.SuspendLayout();
+            this.panel10.SuspendLayout();
+            this.grpPlcTest.SuspendLayout();
             this.SuspendLayout();
             // 
             // mySqlCommand1
@@ -4973,6 +4986,7 @@ namespace MesDatas.Views
             this.tableLayoutPanel14.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.tableLayoutPanel14.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.tableLayoutPanel14.Controls.Add(this.panel20, 0, 0);
+            this.tableLayoutPanel14.Controls.Add(this.panel10, 1, 0);
             this.tableLayoutPanel14.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableLayoutPanel14.Location = new System.Drawing.Point(2, 25);
             this.tableLayoutPanel14.Margin = new System.Windows.Forms.Padding(4);
@@ -7016,6 +7030,119 @@ namespace MesDatas.Views
             this.label11.TabIndex = 6;
             this.label11.Text = "上传结果：";
             // 
+            // txtPlcTestAddress
+            //
+            this.txtPlcTestAddress.Location = new System.Drawing.Point(86, 33);
+            this.txtPlcTestAddress.Name = "txtPlcTestAddress";
+            this.txtPlcTestAddress.Size = new System.Drawing.Size(180, 30);
+            this.txtPlcTestAddress.TabIndex = 69;
+            //
+            // panel10
+            //
+            this.panel10.Controls.Add(this.grpPlcTest);
+            this.panel10.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panel10.Location = new System.Drawing.Point(948, 3);
+            this.panel10.Name = "panel10";
+            this.panel10.Size = new System.Drawing.Size(939, 789);
+            this.panel10.TabIndex = 69;
+            //
+            // btnRead
+            //
+            this.btnRead.Location = new System.Drawing.Point(286, 33);
+            this.btnRead.Name = "btnRead";
+            this.btnRead.Size = new System.Drawing.Size(100, 73);
+            this.btnRead.TabIndex = 70;
+            this.btnRead.Text = "读取";
+            this.btnRead.UseVisualStyleBackColor = true;
+            this.btnRead.Click += new System.EventHandler(this.btnRead_Click);
+            //
+            // grpPlcTest
+            //
+            this.grpPlcTest.Controls.Add(this.txtPlcTestResult);
+            this.grpPlcTest.Controls.Add(this.txtPlcTestStringLength);
+            this.grpPlcTest.Controls.Add(this.lblPlcTestStringLength);
+            this.grpPlcTest.Controls.Add(this.cmbType);
+            this.grpPlcTest.Controls.Add(this.lblType);
+            this.grpPlcTest.Controls.Add(this.lblResult);
+            this.grpPlcTest.Controls.Add(this.lblPoint);
+            this.grpPlcTest.Controls.Add(this.txtPlcTestAddress);
+            this.grpPlcTest.Controls.Add(this.btnRead);
+            this.grpPlcTest.Location = new System.Drawing.Point(3, 3);
+            this.grpPlcTest.Name = "grpPlcTest";
+            this.grpPlcTest.Size = new System.Drawing.Size(520, 230);
+            this.grpPlcTest.TabIndex = 71;
+            this.grpPlcTest.TabStop = false;
+            this.grpPlcTest.Text = "PLC测试";
+            //
+            // txtPlcTestResult
+            //
+            this.txtPlcTestResult.Location = new System.Drawing.Point(86, 166);
+            this.txtPlcTestResult.Name = "txtPlcTestResult";
+            this.txtPlcTestResult.ReadOnly = true;
+            this.txtPlcTestResult.Size = new System.Drawing.Size(414, 30);
+            this.txtPlcTestResult.TabIndex = 76;
+            //
+            // txtPlcTestStringLength
+            //
+            this.txtPlcTestStringLength.Enabled = false;
+            this.txtPlcTestStringLength.Location = new System.Drawing.Point(86, 122);
+            this.txtPlcTestStringLength.Name = "txtPlcTestStringLength";
+            this.txtPlcTestStringLength.Size = new System.Drawing.Size(180, 30);
+            this.txtPlcTestStringLength.TabIndex = 75;
+            this.txtPlcTestStringLength.Text = "10";
+            //
+            // lblPlcTestStringLength
+            //
+            this.lblPlcTestStringLength.AutoSize = true;
+            this.lblPlcTestStringLength.Enabled = false;
+            this.lblPlcTestStringLength.Location = new System.Drawing.Point(18, 126);
+            this.lblPlcTestStringLength.Name = "lblPlcTestStringLength";
+            this.lblPlcTestStringLength.Size = new System.Drawing.Size(46, 24);
+            this.lblPlcTestStringLength.TabIndex = 74;
+            this.lblPlcTestStringLength.Text = "长度";
+            //
+            // lblPoint
+            //
+            this.lblPoint.AutoSize = true;
+            this.lblPoint.Location = new System.Drawing.Point(18, 37);
+            this.lblPoint.Name = "lblPoint";
+            this.lblPoint.Size = new System.Drawing.Size(46, 24);
+            this.lblPoint.TabIndex = 71;
+            this.lblPoint.Text = "地址";
+            //
+            // lblResult
+            //
+            this.lblResult.AutoSize = true;
+            this.lblResult.Location = new System.Drawing.Point(18, 170);
+            this.lblResult.Name = "lblResult";
+            this.lblResult.Size = new System.Drawing.Size(46, 24);
+            this.lblResult.TabIndex = 71;
+            this.lblResult.Text = "结果";
+            //
+            // lblType
+            //
+            this.lblType.AutoSize = true;
+            this.lblType.Location = new System.Drawing.Point(18, 82);
+            this.lblType.Name = "lblType";
+            this.lblType.Size = new System.Drawing.Size(46, 24);
+            this.lblType.TabIndex = 72;
+            this.lblType.Text = "类型";
+            //
+            // cmbType
+            //
+            this.cmbType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbType.FormattingEnabled = true;
+            this.cmbType.Items.AddRange(new object[] {
+            "Int16",
+            "Int32",
+            "String"});
+            this.cmbType.Location = new System.Drawing.Point(86, 78);
+            this.cmbType.Name = "cmbType";
+            this.cmbType.Size = new System.Drawing.Size(180, 31);
+            this.cmbType.TabIndex = 73;
+            this.cmbType.SelectedIndex = 0;
+            this.cmbType.SelectedIndexChanged += new System.EventHandler(this.cmbType_SelectedIndexChanged);
+            //
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(120F, 120F);
@@ -7212,6 +7339,9 @@ namespace MesDatas.Views
             this.tlpTorqueMeter2.PerformLayout();
             this.grpTorqueMonitor2.ResumeLayout(false);
             this.grpTorqueMonitor2.PerformLayout();
+            this.panel10.ResumeLayout(false);
+            this.grpPlcTest.ResumeLayout(false);
+            this.grpPlcTest.PerformLayout();
             this.ResumeLayout(false);
 
         }
@@ -7708,6 +7838,17 @@ namespace MesDatas.Views
         private Label label137;
         private Label label139;
         private Label label11;
+        private Panel panel10;
+        private GroupBox grpPlcTest;
+        private TextBox txtPlcTestAddress;
+        private TextBox txtPlcTestResult;
+        private TextBox txtPlcTestStringLength;
+        private Button btnRead;
+        private Label lblPlcTestStringLength;
+        private Label lblResult;
+        private Label lblPoint;
+        private ComboBox cmbType;
+        private Label lblType;
     }
 }
 

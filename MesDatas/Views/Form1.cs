@@ -7855,6 +7855,111 @@ namespace MesDatas.Views
             }
         }
 
+        /// <summary>
+        /// 根据选择的数据类型读取指定 PLC 地址，并把结果直接显示在测试区域。
+        /// </summary>
+        private void btnRead_Click(object sender, EventArgs e)
+        {
+            string address = txtPlcTestAddress.Text.Trim();
+            if (!isPlcConnected || _readWriteNet == null)
+            {
+                SetPlcTestResult("读取失败：PLC未连接。");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(address))
+            {
+                SetPlcTestResult("读取失败：请输入PLC地址。");
+                return;
+            }
+
+            string dataType = cmbType.SelectedItem?.ToString() ?? "Int16";
+            try
+            {
+                switch (dataType)
+                {
+                    case "Int16":
+                        var int16Result = _readWriteNet.ReadInt16(address);
+                        if (!int16Result.IsSuccess)
+                        {
+                            ReportPlcTestReadFailure(address, dataType, int16Result);
+                            return;
+                        }
+                        SetPlcTestResult($"读取成功：{int16Result.Content}");
+                        break;
+
+                    case "Int32":
+                        var int32Result = _readWriteNet.ReadInt32(address);
+                        if (!int32Result.IsSuccess)
+                        {
+                            ReportPlcTestReadFailure(address, dataType, int32Result);
+                            return;
+                        }
+                        SetPlcTestResult($"读取成功：{int32Result.Content}");
+                        break;
+
+                    case "String":
+                        if (!ushort.TryParse(txtPlcTestStringLength.Text.Trim(), out ushort stringLength) || stringLength == 0)
+                        {
+                            SetPlcTestResult("读取失败：字符串长度必须为1到65535的整数。");
+                            return;
+                        }
+
+                        var stringResult = _readWriteNet.ReadString(address, stringLength);
+                        if (!stringResult.IsSuccess)
+                        {
+                            ReportPlcTestReadFailure(address, dataType, stringResult);
+                            return;
+                        }
+                        SetPlcTestResult($"读取成功：{CodeNum.CleanString(stringResult.Content)}");
+                        break;
+
+                    default:
+                        SetPlcTestResult($"读取失败：不支持的数据类型 {dataType}。");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                SetPlcTestResult($"读取失败：{ex.Message}");
+                Log4netHelper.LogDataException("PLC_TEST_READ_EXCEPTION", ex.Message, new Dictionary<string, object>
+                {
+                    { "address", address },
+                    { "dataType", dataType }
+                });
+            }
+        }
+
+        /// <summary>
+        /// String 类型才需要长度，其他类型不让长度输入参与读取。
+        /// </summary>
+        private void cmbType_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool isString = string.Equals(cmbType.SelectedItem?.ToString(), "String", StringComparison.Ordinal);
+            lblPlcTestStringLength.Enabled = isString;
+            txtPlcTestStringLength.Enabled = isString;
+        }
+
+        private void SetPlcTestResult(string message)
+        {
+            txtPlcTestResult.Text = message;
+        }
+
+        /// <summary>
+        /// 统一显示并记录 PLC 测试读取失败，避免直接读取失败结果的 Content。
+        /// </summary>
+        private void ReportPlcTestReadFailure(string address, string dataType, OperateResult result)
+        {
+            string reason = string.IsNullOrWhiteSpace(result.Message) ? "未知错误" : result.Message;
+            SetPlcTestResult($"读取失败：{reason}");
+            Log4netHelper.LogDataException("PLC_TEST_READ_FAILED", reason, new Dictionary<string, object>
+            {
+                { "address", address },
+                { "dataType", dataType },
+                { "errorCode", result.ErrorCode }
+            });
+        }
+
         private void btnRefresh_Click(object sender, EventArgs e)
         {
             TorqueSerialClient.AutoRefreshComboBoxes(cmbCOM1, cmbCOM2);
