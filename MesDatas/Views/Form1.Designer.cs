@@ -137,8 +137,10 @@ namespace MesDatas.Views
             this.HeartbeatUploadRate = new System.Windows.Forms.TextBox();
             this.label22 = new System.Windows.Forms.Label();
             this.groupBox12 = new System.Windows.Forms.GroupBox();
+            this.cboTorqueAckTimeoutMode = new System.Windows.Forms.ComboBox();
             this.cboProductMode = new System.Windows.Forms.ComboBox();
             this.cboBanUpload = new System.Windows.Forms.ComboBox();
+            this.labelTorqueAckTimeoutMode = new System.Windows.Forms.Label();
             this.cboEnforcePass = new System.Windows.Forms.ComboBox();
             this.label61 = new System.Windows.Forms.Label();
             this.label62 = new System.Windows.Forms.Label();
@@ -156,12 +158,10 @@ namespace MesDatas.Views
             this.tableLayoutPanel33 = new System.Windows.Forms.TableLayoutPanel();
             this.ProductConfig_SaveButton = new System.Windows.Forms.Button();
             this.grpTorqueMeterConfig = new System.Windows.Forms.GroupBox();
-            this.cboTorqueAckTimeoutMode = new System.Windows.Forms.ComboBox();
-            this.labelTorqueAckTimeoutMode = new System.Windows.Forms.Label();
-            this.btnRefresh = new System.Windows.Forms.Button();
             this.cmbCOM2 = new System.Windows.Forms.ComboBox();
             this.lblCOM2 = new System.Windows.Forms.Label();
             this.cmbCOM1 = new System.Windows.Forms.ComboBox();
+            this.btnRefresh = new System.Windows.Forms.Button();
             this.lblCOM1 = new System.Windows.Forms.Label();
             this.grpTorqueConfig = new System.Windows.Forms.GroupBox();
             this.grpTorqueControllerConfig2 = new System.Windows.Forms.GroupBox();
@@ -1754,7 +1754,7 @@ namespace MesDatas.Views
             this.labelTorqueAckTimeoutSeconds.Location = new System.Drawing.Point(26, 263);
             this.labelTorqueAckTimeoutSeconds.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.labelTorqueAckTimeoutSeconds.Name = "labelTorqueAckTimeoutSeconds";
-            this.labelTorqueAckTimeoutSeconds.Size = new System.Drawing.Size(199, 24);
+            this.labelTorqueAckTimeoutSeconds.Size = new System.Drawing.Size(187, 24);
             this.labelTorqueAckTimeoutSeconds.TabIndex = 73;
             this.labelTorqueAckTimeoutSeconds.Text = "扭力ACK超时(单位: s):";
             // 
@@ -1887,6 +1887,17 @@ namespace MesDatas.Views
             this.groupBox12.TabStop = false;
             this.groupBox12.Text = "切换状态即生效";
             // 
+            // cboTorqueAckTimeoutMode
+            //
+            this.cboTorqueAckTimeoutMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cboTorqueAckTimeoutMode.FormattingEnabled = true;
+            this.cboTorqueAckTimeoutMode.Items.AddRange(new object[] {
+            "超时清Req并报警"});
+            this.cboTorqueAckTimeoutMode.Location = new System.Drawing.Point(571, 254);
+            this.cboTorqueAckTimeoutMode.Name = "cboTorqueAckTimeoutMode";
+            this.cboTorqueAckTimeoutMode.Size = new System.Drawing.Size(157, 31);
+            this.cboTorqueAckTimeoutMode.TabIndex = 4;
+            //
             // cboProductMode
             // 
             this.cboProductMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
@@ -1924,6 +1935,15 @@ namespace MesDatas.Views
             this.cboBanUpload.Size = new System.Drawing.Size(128, 29);
             this.cboBanUpload.TabIndex = 73;
             // 
+            // labelTorqueAckTimeoutMode
+            //
+            this.labelTorqueAckTimeoutMode.AutoSize = true;
+            this.labelTorqueAckTimeoutMode.Location = new System.Drawing.Point(567, 227);
+            this.labelTorqueAckTimeoutMode.Name = "labelTorqueAckTimeoutMode";
+            this.labelTorqueAckTimeoutMode.Size = new System.Drawing.Size(150, 24);
+            this.labelTorqueAckTimeoutMode.TabIndex = 3;
+            this.labelTorqueAckTimeoutMode.Text = "PLC接收超时处理";
+            //
             // cboEnforcePass
             // 
             this.cboEnforcePass.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
@@ -2139,36 +2159,6 @@ namespace MesDatas.Views
             this.grpTorqueMeterConfig.TabStop = false;
             this.grpTorqueMeterConfig.Text = "扭力仪串口设定";
             // 
-            // cboTorqueAckTimeoutMode
-            // 
-            this.cboTorqueAckTimeoutMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cboTorqueAckTimeoutMode.FormattingEnabled = true;
-            this.cboTorqueAckTimeoutMode.Items.AddRange(new object[] {
-            "超时清Req并报警"});
-            this.cboTorqueAckTimeoutMode.Location = new System.Drawing.Point(571, 254);
-            this.cboTorqueAckTimeoutMode.Name = "cboTorqueAckTimeoutMode";
-            this.cboTorqueAckTimeoutMode.Size = new System.Drawing.Size(157, 31);
-            this.cboTorqueAckTimeoutMode.TabIndex = 4;
-            // 
-            // labelTorqueAckTimeoutMode
-            // 
-            this.labelTorqueAckTimeoutMode.AutoSize = true;
-            this.labelTorqueAckTimeoutMode.Location = new System.Drawing.Point(567, 227);
-            this.labelTorqueAckTimeoutMode.Name = "labelTorqueAckTimeoutMode";
-            this.labelTorqueAckTimeoutMode.Size = new System.Drawing.Size(150, 24);
-            this.labelTorqueAckTimeoutMode.TabIndex = 3;
-            this.labelTorqueAckTimeoutMode.Text = "PLC接收超时处理";
-            // 
-            // btnRefresh
-            // 
-            this.btnRefresh.Location = new System.Drawing.Point(86, 142);
-            this.btnRefresh.Name = "btnRefresh";
-            this.btnRefresh.Size = new System.Drawing.Size(94, 35);
-            this.btnRefresh.TabIndex = 2;
-            this.btnRefresh.Text = "刷新串口";
-            this.btnRefresh.UseVisualStyleBackColor = true;
-            this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
-            // 
             // cmbCOM2
             // 
             this.cmbCOM2.FormattingEnabled = true;
@@ -2194,6 +2184,16 @@ namespace MesDatas.Views
             this.cmbCOM1.Size = new System.Drawing.Size(94, 31);
             this.cmbCOM1.TabIndex = 1;
             // 
+            // btnRefresh
+            //
+            this.btnRefresh.Location = new System.Drawing.Point(86, 142);
+            this.btnRefresh.Name = "btnRefresh";
+            this.btnRefresh.Size = new System.Drawing.Size(94, 35);
+            this.btnRefresh.TabIndex = 2;
+            this.btnRefresh.Text = "刷新串口";
+            this.btnRefresh.UseVisualStyleBackColor = true;
+            this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
+            //
             // lblCOM1
             // 
             this.lblCOM1.AutoSize = true;

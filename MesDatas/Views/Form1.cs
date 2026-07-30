@@ -867,8 +867,21 @@ namespace MesDatas.Views
 
                 try
                 {
-                    if (btnManualClear.GetPropertySafely(c => c.Visible))
-                        btnManualClear.PerformClick();
+                    if (IsHandleCreated && !IsDisposed)
+                    {
+                        await this.InvokeAsync(() =>
+                        {
+                            if (btnManualClear.Visible && btnManualClear.Enabled)
+                                btnManualClear.PerformClick();
+                        });
+
+                        // 等待报警反馈写入结束，再批量复位其他信号，避免同一 PLC 连接并发写入。
+                        while (_manualClearInProgress && !permanentTaskCts.IsCancellationRequested)
+                            await Task.Delay(50);
+
+                        if (permanentTaskCts.IsCancellationRequested)
+                            return;
+                    }
 
                     /*// 获取目录
                     string localPath = LocalFilePath.GetPropertySafely(c => c.Text);
@@ -1130,7 +1143,11 @@ namespace MesDatas.Views
                 TryReadStringValue(addrInfo.DeviceProgramName, addrInfo.ProgramNameLength, out Program);             // PLC设备使用的程序名称
 
                 if (ProductModel is null || barcodeRule is null || Program is null || !isPlcConnected)
+                {
+                    // 读取失败时短暂让出线程，避免 PLC 异常期间形成无间隔轮询并占满 CPU。
+                    await Task.Delay(200, token);
                     continue;
+                }
 
                 Invoke(new Action(() =>
                 {
@@ -5021,7 +5038,7 @@ namespace MesDatas.Views
             string userMessage = $"[{processName}] 扭力控制器通讯异常：{safeMessage}";
 
             // 通讯异常需要稳定显示在主异常栏，便于操作员直接看到停线原因。
-            lblStatusErrorTip.ExecuteSafely(c => { c.Text = userMessage; c.ForeColor = Color.Red; });
+            //lblStatusErrorTip.ExecuteSafely(c => { c.Text = userMessage; c.ForeColor = Color.Red; });
             rtbErrorLog.AppendToComponent(userMessage);
             AppendLog(processName, userMessage);
 
@@ -5395,6 +5412,10 @@ namespace MesDatas.Views
 
         #region ---------- PLC读写操作 ----------
 
+        private const int PlcReadFailureLogIntervalSeconds = 5;
+        private readonly object _plcReadFailureLogLock = new object();
+        private readonly Dictionary<string, System.DateTime> _plcReadFailureLogTimes = new Dictionary<string, System.DateTime>(StringComparer.Ordinal);
+
         /// <summary>
         /// 尝试读取PLC Int16值，并输出读取到的值，最多重试3次。
         /// <para> resultValue = -1表示读取失败 </para>
@@ -5422,11 +5443,15 @@ namespace MesDatas.Views
                 // ErrorCode < 0 属于通信失败，不属于读写失败
                 if (result.ErrorCode < 0)
                 {
-                    Log4netHelper.LogDataException("PLC_READ_VALUE_COMMUNICATION_ERROR", result.Message, new Dictionary<string, object>
+                    if (ShouldLogPlcReadFailure("COMMUNICATION", address))
                     {
-                        { "address", address },
-                        { "errorCode", result.ErrorCode }
-                    });
+                        Log4netHelper.LogDataException("PLC_READ_VALUE_COMMUNICATION_ERROR", result.Message, new Dictionary<string, object>
+                        {
+                            { "address", address },
+                            { "errorCode", result.ErrorCode }
+                        });
+                    }
+
                     value = -1;
                     return false;
                 }
@@ -5436,7 +5461,7 @@ namespace MesDatas.Views
 
             // 循环3次后仍然失败
             value = -1;
-            if (hasTriedRead)
+            if (hasTriedRead && ShouldLogPlcReadFailure("READ_FAILED", address))
             {
                 Log4netHelper.LogDataException("PLC_READ_VALUE_FAILED", "PLC读取Int16失败", new Dictionary<string, object>
                 {
@@ -5444,6 +5469,24 @@ namespace MesDatas.Views
                 });
             }
             return false;
+        }
+
+        private bool ShouldLogPlcReadFailure(string category, string address)
+        {
+            string key = category + "|" + (address ?? string.Empty);
+            System.DateTime now = System.DateTime.UtcNow;
+
+            lock (_plcReadFailureLogLock)
+            {
+                if (_plcReadFailureLogTimes.TryGetValue(key, out System.DateTime lastLogTime)
+                    && (now - lastLogTime).TotalSeconds < PlcReadFailureLogIntervalSeconds)
+                {
+                    return false;
+                }
+
+                _plcReadFailureLogTimes[key] = now;
+                return true;
+            }
         }
 
         /// <summary>
@@ -6262,10 +6305,12 @@ namespace MesDatas.Views
         #region ---------- 程序报警管理 ----------
 
         private readonly object _errorLock = new object();  // 线程锁
+        private const int ErrorQueueMaxCount = 100;          // 限制异常风暴期间的待处理报警数量
         private bool isBlockingMode = true;                 //  默认为阻塞模式
-        private bool existErrorInErrorTip;                  // 全局阻塞锁：当前已经有错误在显示，为True时所有调用当前字段的方法都被暂停
+        private volatile bool existErrorInErrorTip;         // 全局阻塞锁：当前已经有错误在显示，为True时所有调用当前字段的方法都被暂停
         private ErrorEntity _currentActiveError;            // 当前处理的错误对象
         private readonly Queue<ErrorEntity> ErrorQueue = new Queue<ErrorEntity>();   // 错误队列
+        private volatile bool _manualClearInProgress;
 
         /// <summary>
         /// 业务逻辑错误处理。
@@ -6308,6 +6353,27 @@ namespace MesDatas.Views
                 timeStamp = System.DateTime.Now
             };
 
+            bool shouldShow = false;
+            lock (_errorLock)
+            {
+                if (IsSameError(_currentActiveError, errorData) || ErrorQueue.Any(item => IsSameError(item, errorData)))
+                    return false;
+
+                if (existErrorInErrorTip || _currentActiveError != null)
+                {
+                    if (ErrorQueue.Count >= ErrorQueueMaxCount)
+                        return false;
+
+                    ErrorQueue.Enqueue(errorData);
+                }
+                else
+                {
+                    _currentActiveError = errorData;
+                    existErrorInErrorTip = isBlockingMode && errorData.IsBlockingError;
+                    shouldShow = true;
+                }
+            }
+
             string currentTraceId = ProductPassTraceContext.CurrentTraceId;
             if (!string.IsNullOrWhiteSpace(currentTraceId))
             {
@@ -6315,19 +6381,22 @@ namespace MesDatas.Views
                     $"进入错误处理，反馈地址={feedbackAddress}，反馈值={feedBackValue}，阻塞={isBlockingError}，消息={errorData.LogMessage}");
             }
 
-            lock (_errorLock)
-            {
-                // 如果当前有错误正在显示，则排队
-                if (existErrorInErrorTip || _currentActiveError != null)
-                {
-                    ErrorQueue.Enqueue(errorData);
-                    return false;
-                }
-
-                // 如果没有错误，则立即显示当前错误
+            // 锁内只切换报警状态，避免后台线程持锁同步等待 UI。
+            if (shouldShow)
                 ShowErrorToUi(errorData);
+
+            return false;
+        }
+
+        private static bool IsSameError(ErrorEntity first, ErrorEntity second)
+        {
+            if (first == null || second == null)
                 return false;
-            }
+
+            return string.Equals(first.FeedBackAddress, second.FeedBackAddress, StringComparison.Ordinal)
+                && first.FeedbackValue == second.FeedbackValue
+                && first.IsBlockingError == second.IsBlockingError
+                && string.Equals(first.UserMessage, second.UserMessage, StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -6336,18 +6405,36 @@ namespace MesDatas.Views
         /// <param name="errorData"></param>
         private void ShowErrorToUi(ErrorEntity errorData)
         {
-            _currentActiveError = errorData; // 记录当前错误上下文
+            if (errorData == null || IsDisposed)
+                return;
 
-            // 1.记录错误日志
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke((MethodInvoker)(() => ShowErrorToUi(errorData)));
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                return;
+            }
+
+            lock (_errorLock)
+            {
+                if (!ReferenceEquals(_currentActiveError, errorData))
+                    return;
+            }
+
             rtbErrorLog.AppendToComponent(errorData.LogMessage);
-            lblStatusErrorTip.ExecuteSafely(c => { c.Text = errorData.UserMessage; c.ForeColor = Color.Red; });
+            lblStatusErrorTip.Text = errorData.UserMessage;
+            lblStatusErrorTip.ForeColor = Color.Red;
 
-            // 阻塞模式 && 阻塞错误
             if (isBlockingMode && errorData.IsBlockingError)
             {
-                existErrorInErrorTip = true;     // 设置阻塞标志
-
-                btnManualClear.ExecuteSafely(c => c.Visible = true);
+                btnManualClear.Visible = true;
+                btnManualClear.Enabled = true;
 
                 Log4netHelper.LogDataException("BLOCKING_ERROR", errorData.LogMessage, new Dictionary<string, object>
                 {
@@ -6357,7 +6444,6 @@ namespace MesDatas.Views
                     { "userMessage", errorData.UserMessage }
                 });
             }
-            // 放行模式 || 非阻塞错误
             else
             {
                 Log4netHelper.LogDataException("NON_BLOCKING_ERROR", errorData.LogMessage, new Dictionary<string, object>
@@ -6368,102 +6454,177 @@ namespace MesDatas.Views
                     { "userMessage", errorData.UserMessage }
                 });
 
-                // 1. 非阻塞直接反馈，无需手动清除
-                // 2. 只有当有反馈地址存在 且 PLC 在线时才尝试写入
+                Task.Run(() => CompleteNonBlockingErrorAsync(errorData));
+            }
+        }
+
+        private async Task CompleteNonBlockingErrorAsync(ErrorEntity errorData)
+        {
+            try
+            {
                 if (!string.IsNullOrEmpty(errorData.FeedBackAddress) && isPlcConnected)
                 {
-                    // 使用异步Task写入PLC，绝不阻塞当前方法的执行和UI界面
-                    //Task.Run(() => _readWriteNet.Write(errorData.FeedBackAddress, Convert.ToInt16(errorData.FeedbackValue)));
-                    Task.Run(async () => await _readWriteNet.WriteAsync(errorData.FeedBackAddress, Convert.ToInt16(errorData.FeedbackValue)));
+                    var result = await _readWriteNet.WriteAsync(errorData.FeedBackAddress, Convert.ToInt16(errorData.FeedbackValue));
+                    if (!result.IsSuccess)
+                    {
+                        Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_FAILED",
+                            $"写入PLC地址 {errorData.FeedBackAddress} 失败：{result.Message}");
+                    }
                 }
-
-                // 非阻塞错误处理完后，立即释放状态，检查队列
-                ClearCurrentErrorAndCheckQueue();
+            }
+            catch (Exception ex)
+            {
+                Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_EXCEPTION",
+                    $"写入PLC地址 {errorData.FeedBackAddress} 异常：{ex}");
+            }
+            finally
+            {
+                ClearCurrentErrorAndCheckQueue(errorData);
             }
         }
 
         private async void ManualClear_Click(object sender, EventArgs e)
         {
-            string feedbackAddress = null;
-            short? feedbackValue = null;
+            if (_manualClearInProgress)
+                return;
 
+            ErrorEntity currentError;
             lock (_errorLock)
             {
-                if (_currentActiveError != null)
-                {
-                    feedbackAddress = _currentActiveError.FeedBackAddress;
-                    feedbackValue = _currentActiveError.FeedbackValue;
-                }
+                currentError = _currentActiveError;
             }
 
-            // 存在需要反馈的地址
-            if (!string.IsNullOrEmpty(feedbackAddress))
+            if (currentError == null)
+                return;
+
+            _manualClearInProgress = true;
+            btnManualClear.Enabled = false;
+
+            try
             {
-                if (!isPlcConnected)
+                string feedbackAddress = currentError.FeedBackAddress;
+                short feedbackValue = Convert.ToInt16(currentError.FeedbackValue);
+
+                if (!string.IsNullOrEmpty(feedbackAddress))
                 {
-                    MessageBox.Show($"无法清除错误：PLC当前未连接，请先检查网络通讯！", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
+                    if (!isPlcConnected)
+                    {
+                        MessageBox.Show("无法清除错误：PLC当前未连接，请先检查网络通讯！", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    if (_readWriteNet == null)
+                    {
+                        MessageBox.Show("无法清除错误：PLC通讯对象尚未初始化。", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    // 异步等待不会阻塞 UI；由 PLC 通讯层自身超时，避免本地超时后残留并发写任务。
+                    var result = await _readWriteNet.WriteAsync(feedbackAddress, feedbackValue);
+                    if (!result.IsSuccess)
+                    {
+                        MessageBox.Show($"清除失败：写入PLC地址 {feedbackAddress} 失败。\r\n错误码: {result.ErrorCode}\r\n原因: {result.Message}", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
                 }
 
-                var writeTask = _readWriteNet.WriteAsync(feedbackAddress, Convert.ToInt16(feedbackValue));
-                var completedTask = await Task.WhenAny(writeTask, Task.Delay(500));
-
-                if (completedTask != writeTask)
+                Log4netHelper.LogDataException("MANUAL_CLEAR_DONE", "手动清除报警完成", new Dictionary<string, object>
                 {
-                    MessageBox.Show($"清除失败：写入PLC地址 {feedbackAddress} 超时无响应。", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+                    { "feedback", currentError.FeedBackAddress },
+                    { "value", currentError.FeedbackValue },
+                    { "userMessage", currentError.UserMessage }
+                }, level: "INFO");
 
-                var result = await writeTask;
-                if (!result.IsSuccess)
-                {
-                    MessageBox.Show($"清除失败：写入PLC地址 {feedbackAddress} 失败。\r\n错误码: {result.ErrorCode}\r\n原因: {result.Message}", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+                ClearCurrentErrorAndCheckQueue(currentError);
             }
-
-            Log4netHelper.LogDataException("MANUAL_CLEAR_DONE", "手动清除报警完成", new Dictionary<string, object>
+            catch (Exception ex)
             {
-                { "feedback", feedbackAddress },
-                { "value", feedbackValue },
-                { "userMessage", _currentActiveError?.UserMessage }
-            }, level: "INFO");
+                Log4netHelper.LogDataException("MANUAL_CLEAR_EXCEPTION", "手动清除报警异常", new Dictionary<string, object>
+                {
+                    { "feedback", currentError.FeedBackAddress },
+                    { "value", currentError.FeedbackValue },
+                    { "exception", ex.ToString() }
+                });
 
-            // 2. 反馈成功 || 无地址错误
-            ClearCurrentErrorAndCheckQueue();
+                MessageBox.Show($"清除报警时发生异常：{ex.Message}", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                _manualClearInProgress = false;
+                if (!btnManualClear.IsDisposed)
+                    btnManualClear.Enabled = true;
+            }
         }
 
-        // 【新增】统一的清理与队列检查逻辑
-        private void ClearCurrentErrorAndCheckQueue()
+        private void ClearCurrentErrorAndCheckQueue(ErrorEntity expectedError = null)
         {
-            // 1. 清理当前状态
-            _currentActiveError = null;
-            ResetErrorUi(); // 清空界面文字、隐藏按钮
+            ErrorEntity nextError = null;
 
-            // 2. 检查队列
             lock (_errorLock)
             {
+                if (expectedError != null && !ReferenceEquals(_currentActiveError, expectedError))
+                    return;
+
+                _currentActiveError = null;
+
                 if (ErrorQueue.Count > 0)
                 {
-                    var nextError = ErrorQueue.Dequeue();
-                    ShowErrorToUi(nextError);
+                    nextError = ErrorQueue.Dequeue();
+                    _currentActiveError = nextError;
+                    existErrorInErrorTip = isBlockingMode && nextError.IsBlockingError;
                 }
                 else
                 {
-                    // 3. 只有队列真的空了，才释放全局阻塞锁，允许业务线程继续跑
                     existErrorInErrorTip = false;
                 }
             }
+
+            RefreshErrorUi(nextError);
         }
 
-        // 辅助方法：重置UI
+        private void RefreshErrorUi(ErrorEntity nextError)
+        {
+            if (IsDisposed)
+                return;
+
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke((MethodInvoker)(() => RefreshErrorUi(nextError)));
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                return;
+            }
+
+            lock (_errorLock)
+            {
+                if (nextError == null)
+                {
+                    if (_currentActiveError != null)
+                        return;
+                }
+                else if (!ReferenceEquals(_currentActiveError, nextError))
+                {
+                    return;
+                }
+            }
+
+            ResetErrorUi();
+            if (nextError != null)
+                ShowErrorToUi(nextError);
+        }
+
         private void ResetErrorUi()
         {
-            lblStatusErrorTip.ExecuteSafely(c => c.Text = string.Empty);
-            lblRunningStatus.ExecuteSafely(c => c.Text = string.Empty);
-            barCode.ExecuteSafely(c => c.Text = string.Empty);
-            ToolingNumber.ExecuteSafely(c => c.Text = string.Empty);
-            btnManualClear.ExecuteSafely(c => c.Visible = false);
+            lblStatusErrorTip.Text = string.Empty;
+            lblRunningStatus.Text = string.Empty;
+            barCode.Text = string.Empty;
+            ToolingNumber.Text = string.Empty;
+            btnManualClear.Visible = false;
         }
 
         #endregion
@@ -7449,12 +7610,14 @@ namespace MesDatas.Views
                 // 图片维护数据分割出来的长度大于1，说明是装配机的，需要等待全部的图片数
                 if (pictureNum.Length > 1)
                 {
-                    System.DateTime startTime = System.DateTime.Now;
-                    while (true)
+                    int expectedPictureCount = int.Parse(pictureNum[index]);
+                    Stopwatch waitTimer = Stopwatch.StartNew();
+                    while (dirInfo.GetFiles().Length != expectedPictureCount)
                     {
-                        if (dirInfo.GetFiles().Length == int.Parse(pictureNum[index]))
-                            break;
-                        if ((System.DateTime.Now - startTime).Seconds >= 20) return null;
+                        if (waitTimer.Elapsed >= TimeSpan.FromSeconds(20)) return null;
+
+                        // 图片由外部程序异步生成，无需持续占用 CPU 和反复扫描磁盘。
+                        Thread.Sleep(100);
                     }
                 }
 
