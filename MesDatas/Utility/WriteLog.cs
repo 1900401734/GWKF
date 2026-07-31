@@ -127,6 +127,7 @@ namespace MesDatas.Utility
         {
             public string Message { get; set; }
             public int ClearLength { get; set; }
+            public DateTime OccurredAt { get; set; }
             /// <summary>原样写入（不加时间戳、不去重），供统一流程日志使用。</summary>
             public bool IsRaw { get; set; }
         }
@@ -167,16 +168,8 @@ namespace MesDatas.Utility
 
             int maxLineCount = GetUiLogLineLimit(richtextBox, ClearLength);
             string logMessage = LogMessage ?? string.Empty;
-
-            // 跨线程日志先进入队列，再由 UI 线程批量刷新，避免后台业务线程同步等待界面刷新。
-            if (richtextBox.InvokeRequired)
-            {
-                EnqueueUiLog(richtextBox, logMessage, maxLineCount);
-            }
-            else
-            {
-                _WriteAppendToComponent(richtextBox, logMessage, maxLineCount);
-            }
+            // 所有线程统一入队，避免 UI 直写与后台延迟刷新交错后破坏时间顺序。
+            EnqueueUiLog(richtextBox, logMessage, maxLineCount, DateTime.Now);
         }
 
         /// <summary>
@@ -189,14 +182,7 @@ namespace MesDatas.Utility
                 return;
 
             int maxLineCount = GetUiLogLineLimit(richtextBox, clearLength);
-            if (richtextBox.InvokeRequired)
-            {
-                EnqueueUiLog(richtextBox, line ?? string.Empty, maxLineCount, isRaw: true);
-            }
-            else
-            {
-                _WriteRawToComponent(richtextBox, line ?? string.Empty, maxLineCount);
-            }
+            EnqueueUiLog(richtextBox, line ?? string.Empty, maxLineCount, DateTime.Now, isRaw: true);
         }
 
         private static int GetUiLogLineLimit(RichTextBox richTextBox, int fallbackLineCount)
@@ -213,7 +199,7 @@ namespace MesDatas.Utility
         /// <summary>
         /// 将跨线程日志加入待刷新队列。
         /// </summary>
-        private static void EnqueueUiLog(RichTextBox richTextBox, string logMessage, int clearLength, bool isRaw = false)
+        private static void EnqueueUiLog(RichTextBox richTextBox, string logMessage, int clearLength, DateTime occurredAt, bool isRaw = false)
         {
             bool shouldSchedule = false;
 
@@ -228,7 +214,13 @@ namespace MesDatas.Utility
                 while (state.Items.Count >= UiLogMaxQueueLength)
                     state.Items.Dequeue();
 
-                state.Items.Enqueue(new UiLogItem { Message = logMessage, ClearLength = clearLength, IsRaw = isRaw });
+                state.Items.Enqueue(new UiLogItem
+                {
+                    Message = logMessage,
+                    ClearLength = clearLength,
+                    OccurredAt = occurredAt,
+                    IsRaw = isRaw
+                });
 
                 if (!state.IsFlushScheduled)
                 {
@@ -303,7 +295,7 @@ namespace MesDatas.Utility
                     if (item.IsRaw)
                         _WriteRawToComponent(richTextBox, item.Message, item.ClearLength, manageLayout: false);
                     else
-                        _WriteAppendToComponent(richTextBox, item.Message, item.ClearLength, manageLayout: false);
+                        _WriteAppendToComponent(richTextBox, item.Message, item.ClearLength, item.OccurredAt, manageLayout: false);
                     flushCount++;
                 }
             }
@@ -352,7 +344,7 @@ namespace MesDatas.Utility
         /// <param name="richTextBox">目标控件</param>
         /// <param name="logMessage">日志内容</param>
         /// <param name="maxLineCount">最大行数限制</param>
-        private static void _WriteAppendToComponent(RichTextBox richTextBox, string logMessage, int maxLineCount, bool manageLayout = true)
+        private static void _WriteAppendToComponent(RichTextBox richTextBox, string logMessage, int maxLineCount, DateTime occurredAt, bool manageLayout = true)
         {
             try
             {
@@ -373,7 +365,7 @@ namespace MesDatas.Utility
                     else
                         _logBuilder.Clear();
 
-                    _logBuilder.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+                    _logBuilder.Append(occurredAt.ToString("yyyy-MM-dd HH:mm:ss.fff"));
                     _logBuilder.Append(' ');
                     _logBuilder.Append(logMessage);
                     _logBuilder.Append('\n');

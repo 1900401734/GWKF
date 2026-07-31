@@ -38,12 +38,14 @@ $helperPath = Join-Path $RepoRoot 'MesDatas\Utility\Log4netUtil.cs'
 $httpPath = Join-Path $RepoRoot 'MesDatas\Utility\HttpClientUtil.cs'
 $formPath = Join-Path $RepoRoot 'MesDatas\Views\Form1.cs'
 $writeLogPath = Join-Path $RepoRoot 'MesDatas\Utility\WriteLog.cs'
+$tracePath = Join-Path $RepoRoot 'MesDatas\Utility\ProductPassTraceContext.cs'
 
 $config = [System.IO.File]::ReadAllText($configPath)
 $helper = [System.IO.File]::ReadAllText($helperPath)
 $http = [System.IO.File]::ReadAllText($httpPath)
 $form = [System.IO.File]::ReadAllText($formPath)
 $writeLog = [System.IO.File]::ReadAllText($writeLogPath)
+$trace = [System.IO.File]::ReadAllText($tracePath)
 
 foreach ($oldAppender in @('DebugLog', 'ErrorLog', 'InfoLog', 'WarnLog')) {
     Assert-NotContains $config $oldAppender "Log4net.config must remove old level appender '$oldAppender'."
@@ -83,6 +85,31 @@ Assert-NotContains $helper 'area=' 'Log body must not include area= fields.'
 Assert-NotContains $helper 'action=' 'Log body must not include action= fields.'
 Assert-NotContains $helper $oldOutboxQueueText 'Old outbox queue wording must not appear in log helper.'
 Assert-NotContains $writeLog 'Log4netHelper.Debug' 'WriteLog.AppendToComponent must not write UI logs to Debug files.'
+Assert-Contains $writeLog 'public DateTime OccurredAt' 'UI log queue must retain the original occurrence time.'
+Assert-Contains $writeLog 'EnqueueUiLog(richtextBox, logMessage, maxLineCount, DateTime.Now);' 'Normal UI logs must always use the shared queue.'
+Assert-Contains $writeLog 'EnqueueUiLog(richtextBox, line ?? string.Empty, maxLineCount, DateTime.Now, isRaw: true);' 'Raw UI logs must always use the shared queue.'
+Assert-NotContains $writeLog '_WriteAppendToComponent(richtextBox, logMessage, maxLineCount, occurredAt);' 'Normal UI logs must not bypass the shared queue.'
+Assert-NotContains $writeLog '_WriteRawToComponent(richtextBox, line ?? string.Empty, maxLineCount);' 'Raw UI logs must not bypass the shared queue.'
+
+Assert-Contains $trace ': $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{ProcessName}] {message}";' 'Product pass flow lines must include the configured process name.'
+Assert-Contains $trace 'WriteFlow($"{label}，耗时={watch.ElapsedMilliseconds}ms，失败原因：{reason}");' 'MES failures must retain request elapsed time.'
+
+Assert-Contains $form 'trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);' 'Synchronous MES success must use the concise request-response node.'
+Assert-Contains $form 'trace?.LogFlowElapsedFailure("MES请求-响应完成", httpWatch' 'Synchronous MES failure must use the concise request-response node with elapsed time.'
+Assert-NotContains $form 'trace?.LogFlowElapsed("请求构造完成"' 'Product pass flow must not log the request-build detail node.'
+Assert-NotContains $form 'trace?.LogFlow("发起过站请求")' 'Product pass flow must not log the request-start detail node.'
+Assert-NotContains $form 'trace?.LogFlowFailure("收到过站响应"' 'Product pass flow must not use the old response node.'
+Assert-NotContains $form '请求MES流程开始' 'Production UI must not log the old MES request-start line.'
+Assert-NotContains $form '请求MES流程结束' 'Production UI must not log the old MES request-end line.'
+Assert-NotContains $form 'Log4netHelper.LogProductPass("MES_OUTBOX_' 'Outbox status must not be mixed into the product pass flow file.'
+Assert-NotContains $form 'Log4netHelper.LogProductPass("OFFLINE_BYPASS"' 'Offline status must not be duplicated in the product pass flow file.'
+Assert-Contains $form 'Log4netHelper.LogMesInteraction("MES_OUTBOX_CREATE"' 'Outbox status must be written to the MES interaction log.'
+Assert-Contains $form 'Log4netHelper.LogMesInteraction("OFFLINE_BYPASS"' 'Offline MES status must be written to the MES interaction log.'
+Assert-Contains $form 'uploadEntity.ProductResult' 'Product result reads must use UploadManagerEntity configuration.'
+Assert-Contains $form 'uploadEntity.BarcodeToUpload' 'Barcode reads must use UploadManagerEntity configuration.'
+Assert-Contains $form 'uploadEntity.BarcodeToUploadLength' 'Barcode length must use UploadManagerEntity configuration.'
+Assert-Contains $form 'uploadEntity.feedbackPoint' 'PLC feedback must use UploadManagerEntity configuration.'
+Assert-NotContains $form 'D7116写入失败' 'Product pass feedback logs must not contain the old fixed PLC address.'
 
 $messageOnlyPatternCount = [regex]::Matches($config, '<conversionPattern value="%m%n" />').Count
 if ($messageOnlyPatternCount -ne 6) {
