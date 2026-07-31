@@ -41,6 +41,9 @@ namespace MesDatas.Views
         private const int MaxTorqueAckTimeoutSeconds = 60;                   // 过大会导致扭力转发锁长时间占用
         private const int TorqueAckInitialTimeoutMs = 3000;                  // PLC接收扭力ACK初始等待时间
         private const int TorqueAckPollIntervalMs = 50;                      // ACK轮询间隔，避免错过PLC短暂置位
+        private const int TorqueInterlockWriteIntervalMs = 1000;             // 互锁信号正常写入周期
+        private const int TorqueInterlockRetryDelayMs = 100;                 // 快速失败时最小退避，避免空转
+        private const int TorqueInterlockAlarmThresholdMs = 10000;           // 连续失败达到10秒后报警
         private const int WeightMesStatusCacheLoadDays = 7;                  // 启动时加载最近Weight MES状态，覆盖周末和短期停机重启
         private const int WeightMesStatusCacheRetentionDays = 30;            // 轻量缓存保留天数，避免本地文件长期堆积
         private const int ProductionUiLogMaxLines = 500;                       // 限制生产日志控件体积，避免切页和重绘卡顿
@@ -4635,43 +4638,126 @@ namespace MesDatas.Views
         }
 
         /// <summary>
-        /// 每秒按电批连接状态写入PLC互锁信号：1=允许打螺钉，2=禁止。
-        /// <para>只根据当前连接状态写入，不读取比对、不判断是否已同步。</para>
+        /// 独立监控两个电批互锁地址，避免单个地址写入缓慢时阻塞另一个地址。
         /// </summary>
         private async Task TorqueInterlockMonitorLoopAsync(CancellationToken token)
         {
-            while (!token.IsCancellationRequested)
+            try
             {
-                await Task.Delay(1000, token);
-
-                if (!isPlcConnected) continue;
-
-                if (_clientScanAssy == null || _clientScrewBa == null) continue;
-
-                // ---------- 工序1 互锁：按连接状态每秒写入 ----------
-
-                short targetVal1 = _clientScanAssy.IsConnected ? (short)1 : (short)2;
-                await WriteInterlockAsync(addrInfo.TorqueReady1, targetVal1, "工序1电批互锁信号写入失败", token);
-
-                // ---------- 工序3 互锁：按连接状态每秒写入 ----------
-
-                short targetVal3 = _clientScrewBa.IsConnected ? (short)1 : (short)2;
-                await WriteInterlockAsync(addrInfo.TorqueReady3, targetVal3, "工序3电批互锁信号写入失败", token);
+                await Task.WhenAll(
+                    MonitorTorqueInterlockAsync(
+                        () => _clientScanAssy,
+                        addrInfo.TorqueReady1,
+                        "工序1",
+                        token),
+                    MonitorTorqueInterlockAsync(
+                        () => _clientScrewBa,
+                        addrInfo.TorqueReady3,
+                        "工序3",
+                        token));
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // 窗体关闭时正常结束互锁监控。
             }
         }
 
         /// <summary>
-        /// 写入互锁信号，带3秒超时；超时或失败时上报错误。
+        /// 按电批连接状态持续写入单个PLC互锁地址：1=允许打螺钉，2=禁止。
         /// </summary>
-        private async Task WriteInterlockAsync(string address, short value, string errorMessage, CancellationToken token)
+        private async Task MonitorTorqueInterlockAsync(
+            Func<TorqueControllerClient> clientProvider,
+            string address,
+            string processName,
+            CancellationToken token)
         {
-            var writeTask = _readWriteNet.WriteAsync(address, value);
-            var completedTask = await Task.WhenAny(writeTask, Task.Delay(3000, token));
+            Stopwatch continuousFailure = null;
+            bool alarmReported = false;
 
-            if (token.IsCancellationRequested) return;
+            while (!token.IsCancellationRequested)
+            {
+                TorqueControllerClient client = clientProvider();
+                if (!isPlcConnected || _readWriteNet == null || client == null)
+                {
+                    continuousFailure = null;
+                    alarmReported = false;
+                    await Task.Delay(TorqueInterlockWriteIntervalMs, token);
+                    continue;
+                }
 
-            if (completedTask != writeTask || !writeTask.Result.IsSuccess)
-                HandleError(address, value, true, errorMessage);
+                short targetValue = client.IsConnected ? (short)1 : (short)2;
+                Stopwatch writeDuration = Stopwatch.StartNew();
+                bool writeSucceeded = false;
+                string failureReason = string.Empty;
+
+                try
+                {
+                    OperateResult writeResult = await _readWriteNet.WriteAsync(address, targetValue);
+                    writeSucceeded = writeResult.IsSuccess;
+                    failureReason = writeResult.Message;
+                }
+                catch (Exception ex)
+                {
+                    failureReason = ex.Message;
+                }
+
+                if (token.IsCancellationRequested) break;
+
+                if (writeSucceeded)
+                {
+                    if (continuousFailure != null)
+                    {
+                        Log4netHelper.LogTorque(
+                            "TORQUE_INTERLOCK_WRITE_RECOVERED",
+                            $"{processName}电批互锁信号写入恢复",
+                            new Dictionary<string, object>
+                            {
+                                { "address", address },
+                                { "value", targetValue },
+                                { "failureDurationMs", continuousFailure.ElapsedMilliseconds }
+                            });
+                    }
+
+                    continuousFailure = null;
+                    alarmReported = false;
+
+                    int remainingDelay = TorqueInterlockWriteIntervalMs - (int)writeDuration.ElapsedMilliseconds;
+                    if (remainingDelay > 0)
+                        await Task.Delay(remainingDelay, token);
+                    continue;
+                }
+
+                if (continuousFailure == null)
+                {
+                    continuousFailure = Stopwatch.StartNew();
+                    Log4netHelper.LogTorque(
+                        "TORQUE_INTERLOCK_WRITE_FAILED",
+                        $"{processName}电批互锁信号首次写入失败",
+                        new Dictionary<string, object>
+                        {
+                            { "address", address },
+                            { "value", targetValue },
+                            { "reason", failureReason }
+                        },
+                        level: "WARN");
+                }
+
+                if (!alarmReported && continuousFailure.ElapsedMilliseconds >= TorqueInterlockAlarmThresholdMs)
+                {
+                    alarmReported = true;
+                    string alarmMessage = $"{processName}电批互锁信号连续10秒写入失败";
+                    HandleError(
+                        address,
+                        targetValue,
+                        true,
+                        alarmMessage,
+                        $"{alarmMessage}，最近一次失败原因：{failureReason}");
+                }
+
+                int retryDelay = TorqueInterlockRetryDelayMs - (int)writeDuration.ElapsedMilliseconds;
+                if (retryDelay > 0)
+                    await Task.Delay(retryDelay, token);
+            }
         }
 
         /// <summary>
