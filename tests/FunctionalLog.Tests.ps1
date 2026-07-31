@@ -39,6 +39,7 @@ $httpPath = Join-Path $RepoRoot 'MesDatas\Utility\HttpClientUtil.cs'
 $formPath = Join-Path $RepoRoot 'MesDatas\Views\Form1.cs'
 $writeLogPath = Join-Path $RepoRoot 'MesDatas\Utility\WriteLog.cs'
 $tracePath = Join-Path $RepoRoot 'MesDatas\Utility\ProductPassTraceContext.cs'
+$routeTracePath = Join-Path $RepoRoot 'MesDatas\Utility\RouteCheckTraceContext.cs'
 
 $config = [System.IO.File]::ReadAllText($configPath)
 $helper = [System.IO.File]::ReadAllText($helperPath)
@@ -46,6 +47,7 @@ $http = [System.IO.File]::ReadAllText($httpPath)
 $form = [System.IO.File]::ReadAllText($formPath)
 $writeLog = [System.IO.File]::ReadAllText($writeLogPath)
 $trace = [System.IO.File]::ReadAllText($tracePath)
+$routeTrace = [System.IO.File]::ReadAllText($routeTracePath)
 
 foreach ($oldAppender in @('DebugLog', 'ErrorLog', 'InfoLog', 'WarnLog')) {
     Assert-NotContains $config $oldAppender "Log4net.config must remove old level appender '$oldAppender'."
@@ -71,6 +73,8 @@ foreach ($path in @($mes, $print, $pass, $route, $torque, $exception)) {
 foreach ($method in @('LogMesInteraction', 'LogLabelPrint', 'LogProductPass', 'LogRouteCheck', 'LogTorque', 'LogDataException')) {
     Assert-Contains $helper $method "Log4netHelper must expose $method."
 }
+
+Assert-Contains $helper 'LogRouteCheckLine(string fullLine)' 'Route check logs must expose a raw full-line writer.'
 
 Assert-Contains $helper 'enum LogArea' 'Log4netHelper must define LogArea enum.'
 Assert-Contains $helper 'FormatFlowLog' 'Log4netHelper must format logs as time-based Chinese flow lines.'
@@ -110,6 +114,32 @@ Assert-Contains $form 'uploadEntity.BarcodeToUpload' 'Barcode reads must use Upl
 Assert-Contains $form 'uploadEntity.BarcodeToUploadLength' 'Barcode length must use UploadManagerEntity configuration.'
 Assert-Contains $form 'uploadEntity.feedbackPoint' 'PLC feedback must use UploadManagerEntity configuration.'
 Assert-NotContains $form 'D7116写入失败' 'Product pass feedback logs must not contain the old fixed PLC address.'
+
+Assert-Contains $form 'addrInfo.HasBarcodeTag,' 'Route check trace must use the configured PLC trigger address.'
+Assert-Contains $form 'addrInfo.BarcodeVerifyTag,' 'Route check trace must use the configured PLC feedback address.'
+Assert-NotContains $form 'D7000' 'Route check flow must not contain a fixed PLC trigger address.'
+Assert-NotContains $form 'D7001' 'Route check flow must not contain a fixed PLC feedback address.'
+Assert-Contains $form 'line => rtbReadBarCode.AppendRaw(line)' 'Route check UI must receive the same full line used by the local log.'
+Assert-Contains $routeTrace 'Log4netHelper.LogRouteCheckLine(fullLine)' 'Route check context must reuse one full line for local logging.'
+Assert-Contains $routeTrace '_uiSink?.Invoke(fullLine)' 'Route check context must reuse one full line for UI logging.'
+Assert-Contains $routeTrace 'WriteLine(string.Empty)' 'Completed route checks must append a blank separator line.'
+Assert-Contains $form 'routeCheckTrace?.LogElapsed("拼版MES请求-响应完成", mesWatch)' 'Panelization MES requests must record their own elapsed time.'
+Assert-Contains $form 'routeCheckTrace?.LogElapsed("流程检查MES请求-响应完成", mesWatch)' 'Route-check MES requests must record their own elapsed time.'
+Assert-Contains $form 'OperateResult feedbackResult = _readWriteNet.Write(addrInfo.BarcodeVerifyTag, 1);' 'Route-check success must inspect the configured PLC write result.'
+Assert-Contains $form 'if (feedbackResult.IsSuccess)' 'Route-check success must only be recorded after the PLC write succeeds.'
+Assert-Contains $form 'routeCheckTrace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false)' 'A failed PASS feedback write must be logged as failed.'
+Assert-Contains $form 'currentError.RouteCheckTrace?.CompleteFeedback(passed: false, value: feedbackValue)' 'Blocking failures must finish only after manual PLC feedback succeeds.'
+Assert-Contains $form 'errorData.RouteCheckTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue))' 'Non-blocking failures must finish only after PLC feedback succeeds.'
+Assert-Contains $form 'CompleteWithoutFeedback(passed: false)' 'Paths without a PLC feedback opportunity must be recorded as not fed back.'
+Assert-Contains $form 'result.IsSuccess ? "PANELIZATION_SEND" : "PANELIZATION_SEND_FAILED"' 'Panelization PLC diagnostics must distinguish write failure without changing control flow.'
+Assert-NotContains $form '开始访问MES流程检查' 'Product route-check UI must remove the old MES request-start line.'
+Assert-NotContains $form '收到MES流程检查反馈' 'Product route-check UI must remove the old MES response line.'
+Assert-Contains $form 'if (barcodeType == 2)' 'Tooling barcode behavior must remain isolated in its existing branch.'
+Assert-Contains $form 'Log4netHelper.LogRouteCheck("TOOLING_BARCODE_FEEDBACK"' 'Tooling barcode feedback logging must remain unchanged.'
+
+foreach ($legacyRouteAction in @('PANELIZATION_NULL', 'PANELIZATION_FAIL', 'PANELIZATION_EMPTY', 'PANELIZATION_PASS', 'CHECKROUTE_NULL', 'CHECKROUTE_FAIL')) {
+    Assert-NotContains $form "Log4netHelper.LogRouteCheck(`"$legacyRouteAction`"" "Product diagnostics must not pollute the simplified route-check flow log: $legacyRouteAction."
+}
 
 $messageOnlyPatternCount = [regex]::Matches($config, '<conversionPattern value="%m%n" />').Count
 if ($messageOnlyPatternCount -ne 6) {

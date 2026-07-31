@@ -335,6 +335,7 @@
     <Compile Include="Utility\HttpClientUtil.cs" />
     <Compile Include="Utility\Log4netUtil.cs" />
     <Compile Include="Utility\ProductPassTraceContext.cs" />
+    <Compile Include="Utility\RouteCheckTraceContext.cs" />
     <Compile Include="Utility\RequestMes.cs" />
     <Compile Include="Utility\WriteLog.cs" />
     <EmbeddedResource Include="Views\Form1.resx">

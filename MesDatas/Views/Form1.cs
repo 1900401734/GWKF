@@ -2103,32 +2103,49 @@ namespace MesDatas.Views
                         btnManualInputBarcode.ExecuteSafely(c => c.Visible = false);
                     }
 
+                    RouteCheckTraceContext routeCheckTrace = null;
                     try
                     {
-                        Log4netHelper.LogRouteCheck("SCAN_TRIGGER", "检测到扫码读码信号", new Dictionary<string, object>
+                        if (barcodeType == 2)
                         {
-                            { "address", addrInfo.HasBarcodeTag },
-                            { "value", 1 }
-                        });
+                            Log4netHelper.LogRouteCheck("SCAN_TRIGGER", "检测到扫码读码信号", new Dictionary<string, object>
+                            {
+                                { "address", addrInfo.HasBarcodeTag },
+                                { "value", 1 }
+                            });
+                        }
+                        else
+                        {
+                            routeCheckTrace = RouteCheckTraceContext.Start(
+                                addrInfo.HasBarcodeTag,
+                                addrInfo.BarcodeVerifyTag,
+                                line => rtbReadBarCode.AppendRaw(line));
+                            routeCheckTrace.LogFlow($"PLC触发流程检查，{routeCheckTrace.TriggerAddress}=1");
+                        }
 
                         // 首先清除触发信号
                         _readWriteNet.Write(addrInfo.HasBarcodeTag, 0);
-                        Log4netHelper.LogRouteCheck("SCAN_TRIGGER_CLEAR", "清除扫码读码信号", new Dictionary<string, object>
+                        if (barcodeType == 2)
                         {
-                            { "address", addrInfo.HasBarcodeTag },
-                            { "value", 0 }
-                        });
+                            Log4netHelper.LogRouteCheck("SCAN_TRIGGER_CLEAR", "清除扫码读码信号", new Dictionary<string, object>
+                            {
+                                { "address", addrInfo.HasBarcodeTag },
+                                { "value", 0 }
+                            });
 
-                        rtbReadBarCode.AppendToComponent($"监测到来自'{addrInfo.HasBarcodeTag}'的信号:{triggerValue}");
+                            rtbReadBarCode.AppendToComponent($"监测到来自'{addrInfo.HasBarcodeTag}'的信号:{triggerValue}");
+                        }
 
-                        HandlePlcScanRequest(barcodeType);
+                        HandlePlcScanRequest(barcodeType, routeCheckTrace);
 
-                        rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理完成");
+                        if (barcodeType == 2)
+                            rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理完成");
                     }
                     catch (Exception e)
                     {
-                        HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"扫码读取异常:${e.Message}");
-                        rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理异常");
+                        HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"扫码读取异常:${e.Message}", routeCheckTrace: routeCheckTrace);
+                        if (barcodeType == 2)
+                            rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理异常");
                     }
                 }
                 else
@@ -2153,7 +2170,7 @@ namespace MesDatas.Views
         /// 处理PLC扫码请求的核心业务逻辑
         /// </summary>
         /// <param name="barcodeType">条码类型 1=产品条码  2=工装条码</param>
-        private void HandlePlcScanRequest(int barcodeType)
+        private void HandlePlcScanRequest(int barcodeType, RouteCheckTraceContext routeCheckTrace)
         {
             lock (_lockObject)
             {
@@ -2167,16 +2184,23 @@ namespace MesDatas.Views
                 ushort barcodeLength = Convert.ToUInt16(addrInfo.PlcScannedBarcodeLength);
                 if (!TryReadStringValue(addrInfo.PlcScannedBarcode, barcodeLength, out string scannedBarcode))
                 {
-                    HandleError(addrInfo.BarcodeVerifyTag, 2, true, "无法读取PLC条码信息，请检查连接");
+                    HandleError(addrInfo.BarcodeVerifyTag, 2, true, "无法读取PLC条码信息，请检查连接", routeCheckTrace: routeCheckTrace);
                     return;
                 }
 
-                rtbReadBarCode.AppendToComponent($"读取条码{scannedBarcode}");
-                Log4netHelper.LogRouteCheck("BARCODE_READ", "读取到PLC条码", new Dictionary<string, object>
+                if (barcodeType == 2)
                 {
-                    { "address", addrInfo.PlcScannedBarcode },
-                    { "barcode", scannedBarcode }
-                });
+                    rtbReadBarCode.AppendToComponent($"读取条码{scannedBarcode}");
+                    Log4netHelper.LogRouteCheck("BARCODE_READ", "读取到PLC条码", new Dictionary<string, object>
+                    {
+                        { "address", addrInfo.PlcScannedBarcode },
+                        { "barcode", scannedBarcode }
+                    });
+                }
+                else
+                {
+                    routeCheckTrace?.LogFlow($"条码读取成功，条码={scannedBarcode}");
+                }
 
                 // --- 3. 业务分支：工装条码 (Type 2) ---
                 if (barcodeType == 2)  // 560220-01621-DP-V01-002
@@ -2190,7 +2214,7 @@ namespace MesDatas.Views
                 // 4a. 本地校验 1：产品型号校验 (如果启用)
                 if (EnableTypeChangedVerify.Checked)
                 {
-                    if (!VerifyProductModelMatch(scannedBarcode)) return;
+                    if (!VerifyProductModelMatch(scannedBarcode, routeCheckTrace)) return;
                 }
 
                 // 更新UI显示当前条码
@@ -2200,7 +2224,7 @@ namespace MesDatas.Views
                 if (EnableBarcodeRuleVerify.Checked && BarcodeRule.Text != "" && scannedBarcode.IndexOf(BarcodeRule.Text, StringComparison.Ordinal) < 1)
                 {
                     // 如果在条码中“找不到规则字符串”(-1)，或者“规则字符串在最开头”(0)，则视为校验失败。
-                    HandleBarcodeRuleMismatch();
+                    HandleBarcodeRuleMismatch(routeCheckTrace);
                     return;
                 }
 
@@ -2215,7 +2239,7 @@ namespace MesDatas.Views
                 // 启用拼板条码
                 if (EnableGetNextBoard.Checked)
                 {
-                    if (!TryGetPanelizationBarcodes(ref PrdSNInfo, scannedBarcode)) return;
+                    if (!TryGetPanelizationBarcodes(ref PrdSNInfo, scannedBarcode, routeCheckTrace)) return;
                 }
 
                 #endregion
@@ -2230,7 +2254,7 @@ namespace MesDatas.Views
                 // 4d. MES校验2：流程检查 (如果启用)
                 if (EnableFluentVerify.Checked)
                 {
-                    if (!CheckRouteWithMes(ref snList, ref snCollection, scannedBarcode))
+                    if (!CheckRouteWithMes(ref snList, ref snCollection, scannedBarcode, routeCheckTrace))
                     {
                         return;
                     }
@@ -2238,23 +2262,27 @@ namespace MesDatas.Views
                     // (如果启用了拼板，则把另一个条码发给PLC)
                     if (EnableGetNextBoard.Checked)
                     {
-                        if (!TrySendAnotherBarcodeToPlc(snList, scannedBarcode))
+                        if (!TrySendAnotherBarcodeToPlc(snList, scannedBarcode, routeCheckTrace))
                             return;
                     }
 
                     // 通知PLC继续生产
-                    _readWriteNet.Write($"{addrInfo.BarcodeVerifyTag}", 1);
-                    Log4netHelper.LogRouteCheck("ROUTE_PASS_FEEDBACK", "流程检查成功，通知PLC继续生产", new Dictionary<string, object>
+                    OperateResult feedbackResult = _readWriteNet.Write(addrInfo.BarcodeVerifyTag, 1);
+                    if (feedbackResult.IsSuccess)
                     {
-                        { "barcode", scannedBarcode },
-                        { "feedback", addrInfo.BarcodeVerifyTag },
-                        { "value", 1 }
-                    });
+                        routeCheckTrace?.CompleteFeedback(passed: true, value: 1);
+                    }
+                    else
+                    {
+                        routeCheckTrace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
+                        Log4netHelper.LogDataException("ROUTE_PASS_FEEDBACK_FAILED",
+                            $"流程检查通过，但写入PLC地址 {addrInfo.BarcodeVerifyTag}=1 失败：{feedbackResult.Message}");
+                    }
                 }
                 else
                 {
                     // 如果不启用流程检查，则直接向PLC反馈OK
-                    BypassRouteCheck(scannedBarcode);
+                    BypassRouteCheck(scannedBarcode, routeCheckTrace);
                 }
 
                 #endregion
@@ -2297,7 +2325,7 @@ namespace MesDatas.Views
         /// </summary>
         /// <param name="scannedBarcode">扫码枪读取到的完整条码字符串</param>
         /// <returns>验证通过返回 true，失败（包括数据库无记录或不匹配）返回 false</returns>
-        private bool VerifyProductModelMatch(string scannedBarcode)
+        private bool VerifyProductModelMatch(string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             // 1.获取运行界面中当前生产的产品型号
             string currentModel = txtProductModel.GetPropertySafely(c => c.Text);
@@ -2305,7 +2333,7 @@ namespace MesDatas.Views
             // 2.[参数校验]如果界面没选型号，直接报错
             if (string.IsNullOrEmpty(currentModel))
             {
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "未选择产品型号，无法进行校验");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "未选择产品型号，无法进行校验", routeCheckTrace: routeCheckTrace);
             }
 
             // 3.查询该型号对应的条码匹配规则
@@ -2317,7 +2345,7 @@ namespace MesDatas.Views
             // 5. [空值检查] 如果数据库没查到该型号的配置，视为校验失败
             if (matchTable == null || matchTable.Rows.Count == 0)
             {
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"数据库中未找到型号[{currentModel}]的条码规则配置");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"数据库中未找到型号[{currentModel}]的条码规则配置", routeCheckTrace: routeCheckTrace);
             }
 
             // 6. [规则遍历] 遍历查到的所有匹配规则（可能该型号支持多种条码格式）
@@ -2347,18 +2375,18 @@ namespace MesDatas.Views
 
             // 9. [失败处理] 循环结束仍未匹配，调用错误处理方法
             // 通知 PLC (写入NG信号) 并记录错误日志
-            return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"条码{scannedBarcode}产品型号验证不通过");
+            return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"条码{scannedBarcode}产品型号验证不通过", routeCheckTrace: routeCheckTrace);
         }
 
         /// <summary>
         /// 处理本地条码规则校验失败的逻辑。
         /// </summary>
-        private void HandleBarcodeRuleMismatch()
+        private void HandleBarcodeRuleMismatch(RouteCheckTraceContext routeCheckTrace)
         {
             lblRunningStatus.ExecuteSafely(c =>
                 { c.Text = "验证失败、条码规则验证失败！"; c.ForeColor = Color.Red; });
 
-            HandleError(addrInfo.BarcodeVerifyTag, 2, isBlockingError: true, userMessage: "验证失败、条码规则验证失败！");
+            HandleError(addrInfo.BarcodeVerifyTag, 2, isBlockingError: true, userMessage: "验证失败、条码规则验证失败！", routeCheckTrace: routeCheckTrace);
 
             //readWriteNet.Write($"{plcAddress.BarcodeVerifyTag}", 2);
             //LogMsg($"判断条码规则【{plcAddress.BarcodeVerifyTag}】 = 2");
@@ -2370,7 +2398,7 @@ namespace MesDatas.Views
         /// <param name="prdSNs">传入已扫到的子板条码，传出MES返回的完整拼板列表</param>
         /// <param name="scannedBarcode">当前扫码枪读取到的条码</param>
         /// <returns>true 表示成功, false 表示失败 (内部已调用 HandleError)</returns>
-        private bool TryGetPanelizationBarcodes(ref List<PrdSNs> prdSNs, string scannedBarcode)
+        private bool TryGetPanelizationBarcodes(ref List<PrdSNs> prdSNs, string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             GetBarCodeInputParameter inputParam = new GetBarCodeInputParameter
             {
@@ -2378,44 +2406,46 @@ namespace MesDatas.Views
                 PrdSN = scannedBarcode
             };
 
+            Stopwatch mesWatch = Stopwatch.StartNew();
             GetBarCodeReturnParameter mesResponse = _request.GetResponseSerializeResult<GetBarCodeReturnParameter, GetBarCodeInputParameter>
                 (UrlPanelization.Text, _httpClient, "GETPRDSNGROUP", inputParam, "获取拼版");
+            routeCheckTrace?.LogElapsed("拼版MES请求-响应完成", mesWatch);
 
             // 1. 处理接口连接失败
             if (mesResponse == null)
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_NULL", "连接错误，无法获取拼版条码", new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("PANELIZATION_NULL", "连接错误，无法获取拼版条码", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", "NULL" }
                 }, level: "ERROR");
 
                 return HandleError(
-                    addrInfo.BarcodeVerifyTag, 2, true, "连接错误，无法获取拼版条码");
+                    addrInfo.BarcodeVerifyTag, 2, true, "连接错误，无法获取拼版条码", routeCheckTrace: routeCheckTrace);
             }
 
             // 2. 处理MES返回FAIL
             if (mesResponse.Result.Equals(nameof(MyEnum.Result.FAIL), StringComparison.OrdinalIgnoreCase))
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("PANELIZATION_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", mesResponse.Result }
                 }, level: "WARN");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"获取拼版条码错误:{mesResponse.ErrorMessage}");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"获取拼版条码错误:{mesResponse.ErrorMessage}", routeCheckTrace: routeCheckTrace);
             }
 
             // 3. 处理MES返回PASS，但数据不合规（如非拼板）
             if (mesResponse.PrdSNInfo.PrdSNs.Count <= 1)
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_EMPTY", "获取拼版接口验证通过但没返回拼版条码", new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("PANELIZATION_EMPTY", "获取拼版接口验证通过但没返回拼版条码", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", mesResponse.Result }
                 }, level: "WARN");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "获取拼版接口验证通过但没返回拼版条码");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "获取拼版接口验证通过但没返回拼版条码", routeCheckTrace: routeCheckTrace);
             }
 
             // 4. MES 返回 Pass 且数据合规
@@ -2423,7 +2453,7 @@ namespace MesDatas.Views
 
             // 更新拼板列表
             prdSNs = mesResponse.PrdSNInfo.PrdSNs;
-            Log4netHelper.LogRouteCheck("PANELIZATION_PASS", "拼版条码获取成功", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("PANELIZATION_PASS", "拼版条码获取成功", new Dictionary<string, object>
             {
                 { "barcode", scannedBarcode },
                 { "count", prdSNs.Count }
@@ -2438,7 +2468,7 @@ namespace MesDatas.Views
         /// <param name="snCollection">子板条码集合，不包含子板序号。这是对snList的封装</param>
         /// <param name="scannedBarcode">从PLC获取的条码</param>
         /// <returns>true 表示成功, false 表示失败 (内部已调用 HandleError)</returns>
-        private bool CheckRouteWithMes(ref List<string> snList, ref PrdSNCollection snCollection, string scannedBarcode)
+        private bool CheckRouteWithMes(ref List<string> snList, ref PrdSNCollection snCollection, string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             // ----------- 1.构造MES接口输入参数 -----------
 
@@ -2453,17 +2483,17 @@ namespace MesDatas.Views
 
             // ----------- 2.调用MES流程检查接口 -----------
 
-            rtbReadBarCode.AppendToComponent($"开始访问MES流程检查{scannedBarcode}");
+            Stopwatch mesWatch = Stopwatch.StartNew();
             RouteCheckReturnParam mesResponse = _request.GetResponseSerializeResult<RouteCheckReturnParam,
                                                 RouteCheckInputParam>(Url_RouteCheck.Text, _httpClient, "CHECKROUTE", inputParam, "流程检查");
-            rtbReadBarCode.AppendToComponent($"收到MES流程检查反馈{scannedBarcode}");
+            routeCheckTrace?.LogElapsed("流程检查MES请求-响应完成", mesWatch);
 
             // ----------- 3.处理MES接口返回结果 -----------
 
             // 3a.接口连接失败
             if (mesResponse == null)
             {
-                Log4netHelper.LogRouteCheck("CHECKROUTE_NULL", "访问接口错误，无法进行流程检查", new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("CHECKROUTE_NULL", "访问接口错误，无法进行流程检查", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", "NULL" }
@@ -2471,19 +2501,19 @@ namespace MesDatas.Views
 
                 rtbErrorLog.AppendToComponent("访问接口错误，无法进行流程检查");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "访问接口错误，无法进行流程检查（返回null）");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "访问接口错误，无法进行流程检查（返回null）", routeCheckTrace: routeCheckTrace);
             }
 
             // 3b.MES返回FAIL
             if (mesResponse.Result.Equals(nameof(MyEnum.Result.FAIL), StringComparison.OrdinalIgnoreCase))
             {
-                Log4netHelper.LogRouteCheck("CHECKROUTE_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("CHECKROUTE_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", mesResponse.Result }
                 }, level: "WARN");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"流程检查:{mesResponse.ErrorMessage}");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"流程检查:{mesResponse.ErrorMessage}", routeCheckTrace: routeCheckTrace);
             }
 
             // 3c.MES返回PASS
@@ -2498,47 +2528,54 @@ namespace MesDatas.Views
         /// <param name="snList"></param>
         /// <param name="scannedBarcode"></param>
         /// <returns></returns>
-        private bool TrySendAnotherBarcodeToPlc(List<string> snList, string scannedBarcode)
+        private bool TrySendAnotherBarcodeToPlc(List<string> snList, string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             // 从拼版列表中找到与当前扫描条码不同的另一个条码
             var anotherBarcode = snList.FirstOrDefault(x => x != scannedBarcode);
 
             if (string.IsNullOrWhiteSpace(anotherBarcode))
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_SEND_EMPTY", "流程检查成功，但是查找的拼版结果为空，无法发送到PLC", new Dictionary<string, object>
+                Log4netHelper.LogDataException("PANELIZATION_SEND_EMPTY", "流程检查成功，但是查找的拼版结果为空，无法发送到PLC", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode }
                 }, level: "WARN");
 
-                return HandleError(null, 2, false, "流程检查：无法将拼版条码发送给PLC");
+                return HandleError(null, 2, false, "流程检查：无法将拼版条码发送给PLC", routeCheckTrace: routeCheckTrace);
             }
 
             OperateResult result = _readWriteNet.Write(addrInfo.PanalizationBarcode, anotherBarcode);
-            Log4netHelper.LogRouteCheck("PANELIZATION_SEND", "拼版条码已发送至PLC", new Dictionary<string, object>
+            Log4netHelper.LogDataException(
+                result.IsSuccess ? "PANELIZATION_SEND" : "PANELIZATION_SEND_FAILED",
+                result.IsSuccess ? "拼版条码已发送至PLC" : "拼版条码写入PLC失败",
+                new Dictionary<string, object>
             {
                 { "barcode", scannedBarcode },
                 { "anotherBarcode", anotherBarcode },
                 { "address", addrInfo.PanalizationBarcode },
-                { "success", result.IsSuccess }
-            });
+                { "success", result.IsSuccess },
+                { "message", result.Message }
+            }, level: result.IsSuccess ? "INFO" : "ERROR");
             return true;
         }
 
         /// <summary>
         /// 在未勾选流程检查时，直接向PLC反馈OK。
         /// </summary>
-        private void BypassRouteCheck(string readPlcSn)
+        private void BypassRouteCheck(string readPlcSn, RouteCheckTraceContext routeCheckTrace)
         {
             lblRunningStatus.ExecuteSafely(c => { c.Text = "跳过流程检查成功!"; c.ForeColor = Color.Green; });
 
-            _readWriteNet.Write($"{addrInfo.BarcodeVerifyTag}", 1);
-
-            Log4netHelper.LogRouteCheck("ROUTE_CHECK_BYPASS", "跳过条码验证并反馈PLC", new Dictionary<string, object>
+            OperateResult feedbackResult = _readWriteNet.Write(addrInfo.BarcodeVerifyTag, 1);
+            if (feedbackResult.IsSuccess)
             {
-                { "barcode", readPlcSn },
-                { "feedback", addrInfo.BarcodeVerifyTag },
-                { "value", 1 }
-            });
+                routeCheckTrace?.CompleteFeedback(passed: true, value: 1, skipped: true);
+            }
+            else
+            {
+                routeCheckTrace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
+                Log4netHelper.LogDataException("ROUTE_BYPASS_FEEDBACK_FAILED",
+                    $"流程检查已跳过，但写入PLC地址 {addrInfo.BarcodeVerifyTag}=1 失败：{feedbackResult.Message}");
+            }
         }
 
         #endregion
@@ -6325,7 +6362,7 @@ namespace MesDatas.Views
         /// <param name="userMessage">显示在UI上的、面向操作员的错误消息。</param>
         /// <param name="logMessage">（可选）写入日志文件的更详细的技术性错误信息。如果为 null，将默认使用 userMessage 的内容。</param>
         /// <returns>始终返回 <b>false</b>，以便调用方中断当前操作</returns>
-        private bool HandleError(string feedbackAddress, short? feedBackValue = null, bool isBlockingError = false, string userMessage = null, string logMessage = null)
+        private bool HandleError(string feedbackAddress, short? feedBackValue = null, bool isBlockingError = false, string userMessage = null, string logMessage = null, RouteCheckTraceContext routeCheckTrace = null)
         {
             var errorData = new ErrorEntity()
             {
@@ -6334,6 +6371,7 @@ namespace MesDatas.Views
                 IsBlockingError = isBlockingError,
                 UserMessage = userMessage ?? string.Empty,
                 LogMessage = logMessage ?? userMessage,
+                RouteCheckTrace = routeCheckTrace,
                 timeStamp = System.DateTime.Now
             };
 
@@ -6341,12 +6379,18 @@ namespace MesDatas.Views
             lock (_errorLock)
             {
                 if (IsSameError(_currentActiveError, errorData) || ErrorQueue.Any(item => IsSameError(item, errorData)))
+                {
+                    routeCheckTrace?.CompleteWithoutFeedback(passed: false);
                     return false;
+                }
 
                 if (existErrorInErrorTip || _currentActiveError != null)
                 {
                     if (ErrorQueue.Count >= ErrorQueueMaxCount)
+                    {
+                        routeCheckTrace?.CompleteWithoutFeedback(passed: false);
                         return false;
+                    }
 
                     ErrorQueue.Enqueue(errorData);
                 }
@@ -6451,13 +6495,23 @@ namespace MesDatas.Views
                     var result = await _readWriteNet.WriteAsync(errorData.FeedBackAddress, Convert.ToInt16(errorData.FeedbackValue));
                     if (!result.IsSuccess)
                     {
+                        errorData.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
                         Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_FAILED",
                             $"写入PLC地址 {errorData.FeedBackAddress} 失败：{result.Message}");
                     }
+                    else
+                    {
+                        errorData.RouteCheckTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue));
+                    }
+                }
+                else
+                {
+                    errorData.RouteCheckTrace?.CompleteWithoutFeedback(passed: false);
                 }
             }
             catch (Exception ex)
             {
+                errorData.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
                 Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_EXCEPTION",
                     $"写入PLC地址 {errorData.FeedBackAddress} 异常：{ex}");
             }
@@ -6493,12 +6547,14 @@ namespace MesDatas.Views
                 {
                     if (!isPlcConnected)
                     {
+                        currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show("无法清除错误：PLC当前未连接，请先检查网络通讯！", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
 
                     if (_readWriteNet == null)
                     {
+                        currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show("无法清除错误：PLC通讯对象尚未初始化。", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -6507,9 +6563,16 @@ namespace MesDatas.Views
                     var result = await _readWriteNet.WriteAsync(feedbackAddress, feedbackValue);
                     if (!result.IsSuccess)
                     {
+                        currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show($"清除失败：写入PLC地址 {feedbackAddress} 失败。\r\n错误码: {result.ErrorCode}\r\n原因: {result.Message}", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
+
+                    currentError.RouteCheckTrace?.CompleteFeedback(passed: false, value: feedbackValue);
+                }
+                else
+                {
+                    currentError.RouteCheckTrace?.CompleteWithoutFeedback(passed: false);
                 }
 
                 Log4netHelper.LogDataException("MANUAL_CLEAR_DONE", "手动清除报警完成", new Dictionary<string, object>
@@ -6523,6 +6586,7 @@ namespace MesDatas.Views
             }
             catch (Exception ex)
             {
+                currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(currentError.FeedbackValue), canRetry: true);
                 Log4netHelper.LogDataException("MANUAL_CLEAR_EXCEPTION", "手动清除报警异常", new Dictionary<string, object>
                 {
                     { "feedback", currentError.FeedBackAddress },
