@@ -92,6 +92,15 @@ namespace MesDatas.Utility
         }
 
         /// <summary>
+        /// 以纯文本方式写入一条流程检查日志。
+        /// <para>调用方已经拼好整行，直接原样落盘。</para>
+        /// </summary>
+        public static void LogRouteCheckLine(string fullLine)
+        {
+            RouteCheckLogger.Info(fullLine);
+        }
+
+        /// <summary>
         /// 记录扭力控制器、扭力串口和峰值采集。
         /// </summary>
         public static void LogTorque(string action, object message = null, IDictionary<string, object> fields = null, Exception exception = null, string level = "INFO")

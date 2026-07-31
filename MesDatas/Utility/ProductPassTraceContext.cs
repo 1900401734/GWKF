@@ -83,11 +83,11 @@ namespace MesDatas.Utility
         /// 写入一行统一流程日志：同一行「时间 消息」同时落 UI 与产品过站文件，逐字一致。
         /// </summary>
         /// <param name="message">不含时间戳的消息；为空时两侧都写一个空行（流程间分隔）。</param>
-        private static void WriteFlow(string message)
+        private void WriteFlow(string message)
         {
             string line = string.IsNullOrEmpty(message)
                 ? string.Empty
-                : $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}";
+                : $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{ProcessName}] {message}";
             UiSink?.Invoke(line);                       // UI 原样（含时间戳）
             Log4netHelper.LogProductPassLine(line);     // 文件原样（%m%n）；空串→空行
         }
@@ -103,13 +103,13 @@ namespace MesDatas.Utility
         public void LogFlowBlank() => WriteFlow(null);
 
         /// <summary>
-        /// 记录一个带耗时的流程节点：<c>{label}，耗时=Xms{suffix}</c>。
+        /// 记录一个带耗时的流程节点：<c>{label}{suffix}，耗时=Xms</c>。
         /// </summary>
         public void LogFlowElapsed(string label, Stopwatch watch, string suffix = null)
         {
             if (watch == null) return;
             if (watch.IsRunning) watch.Stop();
-            WriteFlow($"{label}，耗时={watch.ElapsedMilliseconds}ms{suffix}");
+            WriteFlow($"{label}{suffix}，耗时={watch.ElapsedMilliseconds}ms");
         }
 
         /// <summary>
@@ -117,7 +117,7 @@ namespace MesDatas.Utility
         /// </summary>
         public void LogFlowElapsedMs(string label, long elapsedMs, string suffix = null)
         {
-            WriteFlow($"{label}，耗时={elapsedMs}ms{suffix}");
+            WriteFlow($"{label}{suffix}，耗时={elapsedMs}ms");
         }
 
         /// <summary>
@@ -126,6 +126,16 @@ namespace MesDatas.Utility
         public void LogFlowFailure(string label, string reason, string suffix = null)
         {
             WriteFlow($"{label}，失败原因：{reason}{suffix}");
+        }
+
+        /// <summary>
+        /// 记录一个带耗时的失败节点。
+        /// </summary>
+        public void LogFlowElapsedFailure(string label, Stopwatch watch, string reason)
+        {
+            if (watch == null) return;
+            if (watch.IsRunning) watch.Stop();
+            WriteFlow($"{label}，耗时={watch.ElapsedMilliseconds}ms，失败原因：{reason}");
         }
 
         /// <summary>
