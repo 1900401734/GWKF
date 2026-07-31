@@ -154,14 +154,14 @@ namespace MesDatas.Views
             // 写设备名称
             SetDeviceName();
 
+            // 设置工单信息，避免后台任务启动时读取到空工单。
+            SetOrderMessage();
+
             // 启动永久任务
             StartPermanentTask();
 
             // 启动动态任务
             SetDynamicTaskStart();
-
-            // 设置工单信息
-            SetOrderMessage();
 
             // 初始化所有需要维护的表格
             InitDataGirdView();
@@ -355,13 +355,12 @@ namespace MesDatas.Views
         /// </summary>
         private void SetOrderMessage()
         {
-            // 选取最近更新的工单信息
-            string sql = $"SELECT TOP 1 * FROM ChangeOrder WHERE Operator='{Global.Instance.LoginMessage.WorkId}' ORDER BY id DESC";
-            DataTable order = curDb.Find(sql);
             txtUser.Text = Global.Instance.LoginMessage.WorkId;
-            if (order.Rows.Count != 1) return;
-            OrderNo.Text = order.Rows[0]["OrderNo"].ToString();
-            OrderNum.Text = order.Rows[0]["OrderNum"].ToString();
+            Form3Entity order = new WorkOrderHistoryStore(curDb).GetLatestOrder();
+            if (order == null) return;
+
+            OrderNo.Text = order.GDH;
+            OrderNum.Text = order.GDSL.ToString();
         }
 
         /// <summary>

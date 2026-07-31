@@ -323,6 +323,7 @@
     <Compile Include="DataAccess\TypeSugarClass.cs" />
     <Compile Include="Services\PLCAdress.cs" />
     <Compile Include="Services\MesOutboxStore.cs" />
+    <Compile Include="Services\WorkOrderHistoryStore.cs" />
     <Compile Include="Services\WeightMesStatusStore.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
