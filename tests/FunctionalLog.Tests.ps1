@@ -57,7 +57,7 @@ $mes = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C
 $print = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C,0x006F,0x0067,0x0073,0x005C,0x6807,0x7B7E,0x6253,0x5370,0x005C)
 $pass = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C,0x006F,0x0067,0x0073,0x005C,0x4EA7,0x54C1,0x8FC7,0x7AD9,0x005C)
 $route = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C,0x006F,0x0067,0x0073,0x005C,0x6D41,0x7A0B,0x68C0,0x67E5,0x005C)
-$torque = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C,0x006F,0x0067,0x0073,0x005C,0x626D,0x529B,0x68C0,0x6D4B,0x005C)
+$torque = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C,0x006F,0x0067,0x0073,0x005C,0x626D,0x529B,0x68C0,0x6D4B,0x005C)`r`n$scanAssyTorque = $torque + 'Scan_ASSY\'`r`n$screwBaTorque = $torque + 'Screw_BA\'
 $exception = New-Text @(0x0044,0x003A,0x005C,0x004B,0x0061,0x0069,0x0046,0x0061,0x004C,0x006F,0x0067,0x0073,0x005C,0x6570,0x636E,0x5F02,0x5E38,0x005C)
 $uploadAfterFeedbackCreateText = New-Text @(0x5148,0x53CD,0x9988,0x518D,0x4E0A,0x4F20,0x8BB0,0x5F55,0x5DF2,0x521B,0x5EFA,0xFF0C,0x7B49,0x5F85,0x004D,0x0045,0x0053,0x540E,0x53F0,0x786E,0x8BA4)
 $oldOutboxQueueText = New-Text @(0x004D,0x0045,0x0053,0x8FC7,0x7AD9,0x8BB0,0x5F55,0x5DF2,0x5199,0x5165,0x672C,0x5730,0x8865,0x4F20,0x961F,0x5217)
@@ -75,6 +75,18 @@ foreach ($method in @('LogMesInteraction', 'LogLabelPrint', 'LogProductPass', 'L
 }
 
 Assert-Contains $helper 'LogRouteCheckLine(string fullLine)' 'Route check logs must expose a raw full-line writer.'
+Assert-Contains $helper 'LogTorqueLine(ProcessName processName, string fullLine)' 'Torque logs must expose a station-aware raw full-line writer.'
+Assert-Contains $helper 'ScanAssyTorqueLogger.Info(fullLine);' 'Scan_ASSY torque lines must route to the Scan_ASSY logger.'
+Assert-Contains $helper 'ScrewBaTorqueLogger.Info(fullLine);' 'Screw_BA torque lines must route to the Screw_BA logger.'
+Assert-Contains $helper 'TorqueLogger.Info(fullLine);' 'Torque lines without a station must retain the shared logger fallback.'
+Assert-Contains $config $scanAssyTorque 'Scan_ASSY torque logs must use their own folder.'
+Assert-Contains $config $screwBaTorque 'Screw_BA torque logs must use their own folder.'
+Assert-Contains $form 'string fullLine = $"{System.DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {msg}";' 'Torque UI and file logs must share one complete timestamped line.'
+Assert-Contains $form 'Log4netHelper.LogTorqueLine(processName, fullLine);' 'Torque local logs must reuse the complete UI line.'
+Assert-Contains $form 'rtbASSYLog.AppendRaw(fullLine);' 'Scan_ASSY UI must append the complete line without a second timestamp.'
+Assert-Contains $form 'rtbBALog.AppendRaw(fullLine);' 'Screw_BA UI must append the complete line without a second timestamp.'
+Assert-NotContains $form 'rtbASSYLog.AppendToComponent($"[{processName}] {msg}")' 'Scan_ASSY UI must not add a legacy process prefix or second timestamp.'
+Assert-NotContains $form 'rtbBALog.AppendToComponent($"[{processName}] {msg}")' 'Screw_BA UI must not add a legacy process prefix or second timestamp.'
 
 Assert-Contains $helper 'enum LogArea' 'Log4netHelper must define LogArea enum.'
 Assert-Contains $helper 'FormatFlowLog' 'Log4netHelper must format logs as time-based Chinese flow lines.'
@@ -176,7 +188,7 @@ foreach ($legacyRouteAction in @('PANELIZATION_NULL', 'PANELIZATION_FAIL', 'PANE
 }
 
 $messageOnlyPatternCount = [regex]::Matches($config, '<conversionPattern value="%m%n" />').Count
-if ($messageOnlyPatternCount -ne 6) {
+if ($messageOnlyPatternCount -ne 8) {
     throw "All function appenders must use message-only conversionPattern. Actual count: $messageOnlyPatternCount"
 }
 

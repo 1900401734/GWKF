@@ -4570,7 +4570,6 @@ namespace MesDatas.Views
 
             _clientScanAssy.OnTorqueDataReceived += (data) =>
             {
-                AppendLog(ProcessName.Scan_ASSY, BuildTorqueForwardReadyMessage(data));
                 Task.Run(async () => await ForwardTorqueToPlcAsync(ProcessName.Scan_ASSY, data));
             };
 
@@ -4603,7 +4602,6 @@ namespace MesDatas.Views
 
             _clientScrewBa.OnTorqueDataReceived += (data) =>
             {
-                AppendLog(ProcessName.Screw_BA, BuildTorqueForwardReadyMessage(data));
                 Task.Run(async () => await ForwardTorqueToPlcAsync(ProcessName.Screw_BA, data));
             };
 
@@ -4713,7 +4711,7 @@ namespace MesDatas.Views
                 }
 
                 SetTorqueAckWaitingState(context.ProcessName, true);
-                AppendLog(context.ProcessName, $"[转发请求] TransferId={transferId}，扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}，超时={ackTimeoutMs}ms");
+                AppendLog(context.ProcessName, $"[转发请求] 扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}");
 
                 var ackResult = await WaitForTorqueAckAsync(context, ackTimeoutMs);
                 if (!ackResult.IsAckReceived)
@@ -4722,10 +4720,10 @@ namespace MesDatas.Views
                     return;
                 }
 
-                AppendLog(context.ProcessName, $"PLC ACK已收到，TransferId={transferId}，Ack={context.AckAddress}当前值={ackResult.LastAckValue}，等待耗时={ackResult.ElapsedMs}ms");
+                AppendLog(context.ProcessName, $"PLC ACK已收到，{context.AckAddress}={ackResult.LastAckValue}，等待耗时={ackResult.ElapsedMs}ms");
 
                 await WaitForTorqueAckResetAsync(context, transferId);
-                AppendLog(context.ProcessName, $"[转发成功] TransferId={transferId}，扭力:{val}，结果:{resultText}，Req={context.RequestAddress}已复位0，Ack={context.AckAddress}已回0，恢复扭力转发");
+                AppendLog(context.ProcessName, $"[转发成功] {context.RequestAddress}已复位0，{context.AckAddress}已回0，恢复扭力转发");
             }
             catch (Exception ex)
             {
@@ -5047,32 +5045,19 @@ namespace MesDatas.Views
             });
         }
 
-        /// <summary>
-        /// 生成扭力数据进入窗体层后的诊断日志，证明程序已收到解析后的数据。
-        /// </summary>
-        private static string BuildTorqueForwardReadyMessage(TorqueData data)
-        {
-            if (data == null) return "程序已收到空扭力数据，准备转发PLC前已拦截";
-
-            string resultText = data.TighteningStatus ? "OK" : "NG";
-            return $"程序已收到扭力数据，准备转发PLC，Torque={data.Torque}，Min={data.TorqueMin}，Max={data.TorqueMax}，Result={resultText}，Time={data.TimeStamp}";
-        }
-
         // 辅助方法
         private void AppendLog(ProcessName processName, string msg)
         {
-            Log4netHelper.LogTorque("TORQUE_LOG", msg, new Dictionary<string, object>
-            {
-                { "process", processName }
-            });
+            string fullLine = $"{System.DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {msg}";
+            Log4netHelper.LogTorqueLine(processName, fullLine);
 
             switch (processName)
             {
                 case ProcessName.Scan_ASSY:
-                    rtbASSYLog.AppendToComponent($"[{processName}] {msg}");
+                    rtbASSYLog.AppendRaw(fullLine);
                     break;
                 case ProcessName.Screw_BA:
-                    rtbBALog.AppendToComponent($"[{processName}] {msg}");
+                    rtbBALog.AppendRaw(fullLine);
                     break;
                 default:
                     break;
