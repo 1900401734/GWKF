@@ -220,73 +220,101 @@ MES 交互由 `HttpClientUtil`、`RequestMes` 和 `SendResultToMes` 等模块完
 
 ## 6. 数据库与部署目录
 
-### 6.1 当前代码实际使用的数据库格式
+### 6.1 数据库格式
 
-当前代码使用 Microsoft Jet OLEDB 4.0 连接 Access 数据库，代码实际拼接的文件扩展名是 `.mdb`：
+本项目所有数据库文件均为 Microsoft Jet OLEDB 4.0 的 Access `.mdb` 数据库。
+
+程序实际加载的文件名为：
 
 ```text
 SystemDateBase.mdb
 <database_name>.mdb
 ```
 
-虽然现场有时将设备数据库简称为 `xxxx.db`，但当前程序不会自动把 `.db` 当作 `.mdb` 处理。若现场提供的是 `xxxx.db`，必须在交付前确认：
+`SystemDateBase.mdb` 是引导数据库。程序读取其中 `SystemDataBase` 表 `id=1` 记录的 `database_name` 字段，再从 EXE 同级目录加载对应的 `<database_name>.mdb` 设备数据库。
 
-- 是否实际为 Access 数据库文件；
-- 是否需要重命名为 `xxxx.mdb`；
-- 或者是否需要另行修改数据库加载代码。
+### 6.2 仓库中的多设备数据库
 
-不要仅修改扩展名而不确认文件格式，避免程序启动时出现 Jet/OLEDB 连接错误。
-
-### 6.2 多设备数据库关系
-
-程序启动时先加载：
+数据库通过 Git LFS 存放在 `DatabaseFiles`，不要直接跟踪或提交被忽略的 `MesDatas/bin` 构建目录。
 
 ```text
-SystemDateBase.mdb
+DatabaseFiles/
+├─ 上工装1/
+│  ├─ SystemDateBase.mdb
+│  └─ 上工装1.mdb
+├─ 螺钉机/
+│  ├─ SystemDateBase.mdb
+│  └─ 螺钉机.mdb
+└─ 装配机/
+   ├─ SystemDateBase.mdb
+   └─ 装配机.mdb
 ```
 
-然后读取其中 `SystemDataBase` 表 `id=1` 记录的 `database_name` 字段，再加载当前设备数据库：
+已确认的设备映射：
 
-```text
-<database_name>.mdb
+| 设备 | 仓库中的引导数据库来源 | `database_name` 指向的设备库 |
+| --- | --- | --- |
+| 上工装1 | `DatabaseFiles/上工装1/SystemDateBase.mdb` | `上工装1.mdb` |
+| 螺钉机 | `DatabaseFiles/螺钉机/SystemDateBase.mdb` | `螺钉机.mdb` |
+| 装配机 | `DatabaseFiles/装配机/SystemDateBase.mdb` | `装配机.mdb` |
+
+每台设备运行时只复制其目录中的两个 `.mdb` 文件，不能混用其它设备的引导库和设备库。
+
+### 6.3 Git LFS 拉取数据库
+
+首次克隆或换电脑后执行：
+
+```powershell
+git lfs install
+git lfs pull
 ```
 
-因此多个设备可以使用多个独立设备数据库文件，设备切换的关键是 `SystemDateBase.mdb` 中的 `database_name` 配置。
+如果未执行 `git lfs pull`，工作区中的 `.mdb` 可能只是文本指针，程序无法将其作为 Access 数据库打开。
 
-交接时建议维护以下设备映射表：
+检查 LFS 文件：
 
-| 设备/产线 | 引导数据库 | 当前设备数据库 | 用途 |
-| --- | --- | --- | --- |
-| 设备 A | `SystemDateBase.mdb` | `<database_name>.mdb` | 系统配置、生产配置、PLC 地址、检测项 |
-| 设备 B | `SystemDateBase.mdb` | `<database_name>.mdb` | 系统配置、生产配置、PLC 地址、检测项 |
-| 设备 C | `SystemDateBase.mdb` | `<database_name>.mdb` | 系统配置、生产配置、PLC 地址、检测项 |
-
-现场交付时应把实际文件名和设备名称补入此表，不要只交付一个未标识的数据库文件。
-
-### 6.3 数据库必须放在运行目录
-
-程序通过 `AppDomain.CurrentDomain.BaseDirectory` 拼接数据库路径，因此数据库必须放在程序实际运行目录：
-
-```text
-MesDatas\bin\Debug\SystemDateBase.mdb
-MesDatas\bin\Debug\<database_name>.mdb
+```powershell
+git lfs ls-files
 ```
 
-如果运行 Release，则对应放在：
+应能看到 6 个 `.mdb` 文件。
 
-```text
-MesDatas\bin\Release\SystemDateBase.mdb
-MesDatas\bin\Release\<database_name>.mdb
+### 6.4 复制到程序运行目录
+
+Debug 调试装配机示例：
+
+```powershell
+New-Item -ItemType Directory "MesDatas\bin\Debug" -Force | Out-Null
+Copy-Item `
+  "DatabaseFiles\装配机\*.mdb" `
+  "MesDatas\bin\Debug\" `
+  -Force
 ```
 
-数据库不在运行目录时，常见表现包括：
+Release 运行装配机示例：
 
-- 启动时无法读取系统数据库；
-- 无法查询当前设备数据库名；
-- 生产配置页面为空或报错；
-- 登录、工单、PLC 地址、检测项加载失败。
+```powershell
+New-Item -ItemType Directory "MesDatas\bin\Release" -Force | Out-Null
+Copy-Item `
+  "DatabaseFiles\装配机\*.mdb" `
+  "MesDatas\bin\Release\" `
+  -Force
+```
 
-数据库连接使用的主要参数：
+其它设备将命令中的 `装配机` 替换为 `上工装1` 或 `螺钉机`。
+
+程序使用 `AppDomain.CurrentDomain.BaseDirectory` 拼接数据库路径，因此两个数据库必须位于 EXE 同级目录。数据库缺失或设备组合错误时，常见表现包括：
+
+- 启动时无法打开 `SystemDateBase.mdb`；
+- 无法读取当前设备数据库名；
+- 登录、工单、生产配置、PLC 地址或检测项加载失败；
+- 程序加载了错误设备的 PLC 地址和业务配置。
+
+不要配置 `CopyToOutputDirectory` 或 PostBuild 自动覆盖数据库。现场数据库可能已经由调试人员调整，每次构建自动复制会覆盖现场配置。需要更新时应人工备份、核对设备名称后再复制。
+
+### 6.5 数据库运行环境和安全边界
+
+数据库连接参数由现有代码固定使用：
 
 ```text
 Provider: Microsoft.Jet.OLEDB.4.0
@@ -294,8 +322,9 @@ User: admin
 Database password: byd
 ```
 
-现场机器需要安装可用的 Jet OLEDB 运行环境，并注意程序平台位数与数据库驱动兼容。Debug 配置当前为 x86，通常更适合现场旧版 Jet/COM 组件环境。
+Debug AnyCPU 配置实际使用 x86，通常更适合旧版 Jet OLEDB 和打标 COM 组件环境。现场电脑需要安装可用的 Jet OLEDB 运行环境，并保证进程位数与驱动兼容。
 
+这些 MDB 是现场原始数据库，包含 MES 接口配置、设备网络配置、打印配置和用户记录。当前仓库为公开仓库，文件一旦进入 Git/LFS 历史，即使后续删除也不能视为已经撤回。若需要撤回公开数据，必须轮换相关凭据，并按 Git/LFS 历史清理流程处理。
 ## 7. 编译与运行
 
 ### 7.1 必备环境
@@ -456,7 +485,138 @@ MesDatas\bin\Release\
 5. 流程检查或产品上传是否被配置屏蔽。
 6. 产品过站、流程检查和数据异常日志中的同一时间段记录。
 
-## 11. 版本和历史
+## 11. Git Flow 分支规范
+
+本仓库采用适合独立开发和客户现场快速迭代的简化 Git Flow。当前 GitHub 未配置强制 branch protection，以下规则依赖维护人员自觉遵守。
+
+### 11.1 分支职责
+
+| 分支 | 职责 | 允许来源 |
+| --- | --- | --- |
+| `main` | 稳定、可发布代码；正式 tag 只创建在此分支的发布提交上 | 只允许 `develop` 或 `hotfix/*` 通过 GitHub Pull Request 合并 |
+| `develop` | 集成开发分支，保存开发过程中所有有效提交和合并节点 | `feature/*`、`fix/*`，或独立开发者的直接提交 |
+| `feature/*` | 新功能开发 | 从 `develop` 创建，完成后合并回 `develop` |
+| `fix/*` | 普通缺陷修复 | 从 `develop` 创建，完成后合并回 `develop` |
+| `hotfix/*` | 已发布稳定版本的紧急修复 | 从 `main` 创建，必须同步到 `main` 和 `develop` |
+
+命名统一使用 `fix/*`，不使用 `fixed/*`。
+
+### 11.2 main 分支规则
+
+`main` 只能接收 `develop` 或 `hotfix/*` 的合并：
+
+- 禁止在本地 `main` 上直接开发或创建业务提交；
+- 禁止直接 `git push origin main` 发布普通变更；
+- 禁止 force push；
+- 使用 GitHub Pull Request 和 Merge Commit 保留发布或 hotfix 合并节点；
+- 远程合并后，本地 `main` 只通过 `git pull --ff-only` 更新。
+
+由于仓库当前未启用 GitHub ruleset，管理员权限仍可以绕过以上规范。误推风险需要通过操作习惯和提交前检查控制。
+
+### 11.3 推荐功能开发流程
+
+```mermaid
+flowchart LR
+    D[develop] --> F[feature/* 或 fix/*]
+    F --> C[原子提交和验证]
+    C --> M[--no-ff 合并回 develop]
+    M --> P[push origin/develop]
+    P --> PR[GitHub PR: develop -> main]
+    PR --> RM[远程 Merge Commit]
+    RM --> L[本地 main: pull --ff-only]
+```
+
+推荐命令：
+
+```powershell
+git switch develop
+git fetch --prune
+git pull --ff-only origin develop
+
+git switch -c feature/feature-name
+# 开发、测试并创建原子提交
+
+git switch develop
+git merge --no-ff feature/feature-name `
+  -m "merge(feature): 合并功能说明"
+git push origin develop
+```
+
+完成集成测试后，在 GitHub 创建：
+
+```text
+develop -> main
+```
+
+远程合并完成后更新本地 `main`：
+
+```powershell
+git switch main
+git fetch --prune
+git pull --ff-only origin main
+```
+
+允许独立开发者直接在 `develop` 上开发，但更推荐使用 `feature/*` 或 `fix/*`，因为独立分支更容易回滚、评审和保持原子提交边界。
+
+### 11.4 Hotfix 流程
+
+```mermaid
+flowchart LR
+    M[main] --> H[hotfix/*]
+    H --> T[修复和验证]
+    T --> P[push hotfix]
+    P --> PR[GitHub PR: hotfix -> main]
+    PR --> MM[远程 Merge Commit]
+    H --> D[--no-ff 合并回 develop]
+    D --> PD[push origin/develop]
+    MM --> L[本地 main: pull --ff-only]
+```
+
+推荐命令：
+
+```powershell
+git switch main
+git fetch --prune
+git pull --ff-only origin main
+
+git switch -c hotfix/issue-name
+# 修复、测试并推送
+git push -u origin hotfix/issue-name
+```
+
+在 GitHub 创建并合并：
+
+```text
+hotfix/issue-name -> main
+```
+
+随后同步到 `develop`：
+
+```powershell
+git switch develop
+git fetch --prune
+git pull --ff-only origin develop
+git merge --no-ff hotfix/issue-name `
+  -m "merge(hotfix): 同步紧急修复"
+git push origin develop
+```
+
+最后更新本地 `main`：
+
+```powershell
+git switch main
+git pull --ff-only origin main
+```
+
+### 11.5 提交和发布原则
+
+- 使用 Conventional Commits，例如 `feat(...)`、`fix(...)`、`docs(...)`、`chore(...)`；
+- 每个提交只包含一个可说明的行为或文档目的；
+- 合并前检查 `git status`、暂存差异和 `git diff --cached --check`；
+- `develop` 保留所有开发节点，不 squash 已经需要追溯的现场修复；
+- 正式发布时从 `develop` 合并到 `main`，在最终 `main` 发布提交上创建 annotated tag；
+- 远程合并后使用 `git fetch --prune` 清理远程引用，再用 `git pull --ff-only` 更新本地长期分支。
+## 12. 版本和历史
 
 - `v1.1.0`：工单历史、产品过站/流程检查日志优化、扭力日志分工位落盘、电批互锁写入容错等。
 - README 中的 Git 版本号用于代码发布追踪；现场旧版软件名称或客户版本号如仍在使用，应在交接单中单独登记。
