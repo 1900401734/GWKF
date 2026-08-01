@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 )
 
@@ -95,16 +95,41 @@ Assert-Contains $writeLog 'EnqueueUiLog(richtextBox, line ?? string.Empty, maxLi
 Assert-NotContains $writeLog '_WriteAppendToComponent(richtextBox, logMessage, maxLineCount, occurredAt);' 'Normal UI logs must not bypass the shared queue.'
 Assert-NotContains $writeLog '_WriteRawToComponent(richtextBox, line ?? string.Empty, maxLineCount);' 'Raw UI logs must not bypass the shared queue.'
 
-Assert-Contains $trace ': $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{ProcessName}] {message}";' 'Product pass flow lines must include the configured process name.'
-Assert-Contains $trace 'WriteFlow($"{label}，耗时={watch.ElapsedMilliseconds}ms，失败原因：{reason}");' 'MES failures must retain request elapsed time.'
+Assert-Contains $trace ': $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}";' 'Product pass flow lines must use one timestamp without an extra process prefix.'
+Assert-Contains $trace 'UiSink?.Invoke(line);' 'Product pass UI must receive the same full line used by the local log.'
+Assert-Contains $trace 'Log4netHelper.LogProductPassLine(line);' 'Product pass context must reuse one full line for local logging.'
+Assert-Contains $trace 'WriteFlowCore(string.Empty);' 'Completed product passes must append a blank separator line.'
+Assert-Contains $trace 'CompleteCore($"{result}，反馈{FeedbackPoint}={value}，总耗时={_totalWatch.ElapsedMilliseconds}ms");' 'Successful PLC writes must create the final product-pass result line.'
+Assert-Contains $trace 'WriteFlowCore($"{result}，但反馈{FeedbackPoint}={value}写入失败，总耗时={_totalWatch.ElapsedMilliseconds}ms");' 'Failed PLC writes must be recorded explicitly.'
+Assert-NotContains $trace 'LogFlowFailure(' 'Product pass main flow must not expose failure-reason nodes.'
+Assert-NotContains $trace 'LogFlowElapsedFailure(' 'MES failure details must stay out of the concise product pass flow.'
 
-Assert-Contains $form 'trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);' 'Synchronous MES success must use the concise request-response node.'
-Assert-Contains $form 'trace?.LogFlowElapsedFailure("MES请求-响应完成", httpWatch' 'Synchronous MES failure must use the concise request-response node with elapsed time.'
+$triggerLine = 'trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");'
+$triggerLineCount = [regex]::Matches($form, [regex]::Escape($triggerLine)).Count
+if ($triggerLineCount -ne 4) {
+    throw "All product-pass entry points must use the configured trigger address without extra spaces. Actual count: $triggerLineCount"
+}
+
+Assert-Contains $form 'trace?.LogFlowElapsed("产品信息读取完成", productInfoWatch' 'Product pass flow must retain the product-information node.'
+Assert-Contains $form 'trace?.LogFlowElapsed("测试数据读取完成", testDataWatch);' 'Product pass flow must retain the test-data node.'
+Assert-Contains $form 'trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);' 'Every completed MES request must use the same concise request-response node.'
+Assert-NotContains $form 'LogFlowFailure(' 'Product pass main flow must not include detailed failure-reason nodes.'
+Assert-NotContains $form 'LogFlowElapsedFailure(' 'Product pass MES failure details must stay in diagnostic logs.'
 Assert-NotContains $form 'trace?.LogFlowElapsed("请求构造完成"' 'Product pass flow must not log the request-build detail node.'
 Assert-NotContains $form 'trace?.LogFlow("发起过站请求")' 'Product pass flow must not log the request-start detail node.'
-Assert-NotContains $form 'trace?.LogFlowFailure("收到过站响应"' 'Product pass flow must not use the old response node.'
 Assert-NotContains $form '请求MES流程开始' 'Production UI must not log the old MES request-start line.'
 Assert-NotContains $form '请求MES流程结束' 'Production UI must not log the old MES request-end line.'
+foreach ($legacyProductLine in @(
+    'UploadMes.AppendToComponent($"[{uploadEntity.Name}] 读取到条码：{prdSN}");',
+    'UploadMes.AppendToComponent($"[{uploadEntity.Name}] 准备读取测试数据");',
+    'UploadMes.AppendToComponent($"[{uploadEntity.Name}] 测试数据读取完成");',
+    'UploadMes.AppendToComponent($"[{uploadEntity.Name}] 开始执行数据上传流程 <-");',
+    'UploadMes.AppendToComponent($"[{uploadEntity.Name}] -> 数据上传流程执行结束");',
+    'UploadMes.AppendToComponent($"[{uploadEntity.Name}] 过站成功，反馈{uploadEntity.feedbackPoint} = 1");'
+)) {
+    Assert-NotContains $form $legacyProductLine "Product pass UI must remove legacy verbose line: $legacyProductLine"
+}
+Assert-NotContains $form 'trace?.LogFlowFailure("数据采集完成"' 'Product pass flow must not use the old data-collection result wording.'
 Assert-NotContains $form 'Log4netHelper.LogProductPass("MES_OUTBOX_' 'Outbox status must not be mixed into the product pass flow file.'
 Assert-NotContains $form 'Log4netHelper.LogProductPass("OFFLINE_BYPASS"' 'Offline status must not be duplicated in the product pass flow file.'
 Assert-Contains $form 'Log4netHelper.LogMesInteraction("MES_OUTBOX_CREATE"' 'Outbox status must be written to the MES interaction log.'
@@ -114,6 +139,15 @@ Assert-Contains $form 'uploadEntity.BarcodeToUpload' 'Barcode reads must use Upl
 Assert-Contains $form 'uploadEntity.BarcodeToUploadLength' 'Barcode length must use UploadManagerEntity configuration.'
 Assert-Contains $form 'uploadEntity.feedbackPoint' 'PLC feedback must use UploadManagerEntity configuration.'
 Assert-NotContains $form 'D7116写入失败' 'Product pass feedback logs must not contain the old fixed PLC address.'
+Assert-Contains $form 'ProductPassTrace = productPassTrace' 'Blocking errors must retain the product-pass trace context.'
+Assert-Contains $form 'productPassTrace?.HandOffToError();' 'Product-pass traces must not finish before queued errors are handled.'
+Assert-Contains $form 'currentError.ProductPassTrace?.CompleteFeedback(passed: false, value: feedbackValue)' 'Manual clear must finish the trace only after PLC feedback succeeds.'
+Assert-Contains $form 'errorData.ProductPassTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue))' 'Non-blocking errors must finish the trace only after PLC feedback succeeds.'
+Assert-Contains $form 'currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true)' 'Manual-clear feedback failures must remain retryable.'
+Assert-Contains $form 'errorData.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false)' 'Non-blocking feedback failures must close as failed writes.'
+Assert-Contains $form 'if (feedbackResult.IsSuccess)' 'PLC feedback success must be inspected before a flow is completed.'
+Assert-Contains $form 'trace?.CompleteFeedback(passed: true, value: 1);' 'PASS feedback must be logged only through the completion helper.'
+Assert-Contains $form 'trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);' 'Failed PASS feedback must not be recorded as successful.'
 
 Assert-Contains $form 'addrInfo.HasBarcodeTag,' 'Route check trace must use the configured PLC trigger address.'
 Assert-Contains $form 'addrInfo.BarcodeVerifyTag,' 'Route check trace must use the configured PLC feedback address.'
