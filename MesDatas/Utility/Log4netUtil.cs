@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using MesDatas.MyEnum;
 using System.Linq;
 using System.Text.RegularExpressions;
 
@@ -32,6 +33,8 @@ namespace MesDatas.Utility
         private static readonly log4net.ILog ProductPassLogger = log4net.LogManager.GetLogger("ProductPassLog");
         private static readonly log4net.ILog RouteCheckLogger = log4net.LogManager.GetLogger("RouteCheckLog");
         private static readonly log4net.ILog TorqueLogger = log4net.LogManager.GetLogger("TorqueLog");
+        private static readonly log4net.ILog ScanAssyTorqueLogger = log4net.LogManager.GetLogger("ScanAssyTorqueLog");
+        private static readonly log4net.ILog ScrewBaTorqueLogger = log4net.LogManager.GetLogger("ScrewBaTorqueLog");
         private static readonly log4net.ILog DataExceptionLogger = log4net.LogManager.GetLogger("DataExceptionLog");
 
         /// <summary>
@@ -92,11 +95,39 @@ namespace MesDatas.Utility
         }
 
         /// <summary>
+        /// 以纯文本方式写入一条流程检查日志。
+        /// <para>调用方已经拼好整行，直接原样落盘。</para>
+        /// </summary>
+        public static void LogRouteCheckLine(string fullLine)
+        {
+            RouteCheckLogger.Info(fullLine);
+        }
+
+        /// <summary>
         /// 记录扭力控制器、扭力串口和峰值采集。
         /// </summary>
         public static void LogTorque(string action, object message = null, IDictionary<string, object> fields = null, Exception exception = null, string level = "INFO")
         {
             Write(LogArea.Torque, level, action, message, fields, exception);
+        }
+
+        /// <summary>
+        /// 将已包含时间戳的扭力流程日志原样写入对应工位目录。
+        /// </summary>
+        public static void LogTorqueLine(ProcessName processName, string fullLine)
+        {
+            switch (processName)
+            {
+                case ProcessName.Scan_ASSY:
+                    ScanAssyTorqueLogger.Info(fullLine);
+                    break;
+                case ProcessName.Screw_BA:
+                    ScrewBaTorqueLogger.Info(fullLine);
+                    break;
+                default:
+                    TorqueLogger.Info(fullLine);
+                    break;
+            }
         }
 
         /// <summary>

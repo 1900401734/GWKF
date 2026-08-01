@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using MesDatas.Utility;
 
 namespace MesDatas.Models
 {
@@ -17,6 +18,10 @@ namespace MesDatas.Models
         public string UserMessage { get; set; }
 
         public string LogMessage { get; set; }
+
+        internal RouteCheckTraceContext RouteCheckTrace { get; set; }
+
+        internal ProductPassTraceContext ProductPassTrace { get; set; }
 
         public DateTime timeStamp;
     }

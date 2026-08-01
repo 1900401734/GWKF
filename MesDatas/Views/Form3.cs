@@ -1,7 +1,8 @@
 ﻿using System;
-using System.Data;
+using System.Collections.Generic;
 using System.Windows.Forms;
 using MesDatas.Models;
+using MesDatas.Services;
 using MesDatas.Utility;
 
 namespace MesDatas.Views
@@ -12,11 +13,13 @@ namespace MesDatas.Views
         public delegate void ValueSelectedEventHandler(Form3Entity selectedValue);
         public event ValueSelectedEventHandler ValueSelected;
 
-        private AccessHelper mdb = new AccessHelper(Global.Instance.DataBase);
+        private readonly AccessHelper mdb = new AccessHelper(Global.Instance.DataBase);
+        private readonly WorkOrderHistoryStore _workOrderHistoryStore;
 
         public Form3()
         {
             InitializeComponent();
+            _workOrderHistoryStore = new WorkOrderHistoryStore(mdb);
             Operator.Text = Global.Instance.LoginMessage.WorkId;
         }
 
@@ -41,62 +44,43 @@ namespace MesDatas.Views
 
         private void button1_Click(object sender, EventArgs e)
         {
-            //if (OrderNo.Text.Length < 1)
-            //{
-            //    MessageBox.Show("工单号不能为空！");
-            //    return;
-            //}
-            //else if (OrderNum.Text.Length < 1)
-            //{
-            //    MessageBox.Show("工单数量不能为空！");
-            //    return;
-            //}
-            //else if (Operator.Text.Length < 1)
-            //{
-            //    MessageBox.Show("操作员不能为空！");
-            //    return;
-            //}
-            string orderNum = string.IsNullOrEmpty(OrderNum.Text) ? "0" : OrderNum.Text;
-            string orderNo = OrderNo.Text;
-            string oper = Operator.Text;
+            string orderNo = OrderNo.Text.Trim();
+            string oper = Operator.Text.Trim();
+            int orderQuantity;
+            int.TryParse(OrderNum.Text, out orderQuantity);
 
-            AccessHelper mdb = new AccessHelper(Global.Instance.DataBase);
-
-            DataTable count = mdb.Find($"select * from ChangeOrder where OrderNo='{orderNo}' and Operator='{oper}' and OrderNum={orderNum}");
-
-            bool result = true;
-            //如果查出来没数据，需要将新方案保存
-            if (count.Rows.Count == 0) 
+            if (string.IsNullOrWhiteSpace(orderNo))
             {
-                string sql = $"insert into ChangeOrder (OrderNo,Operator,OrderNum) values ('{orderNo}','{oper}',{orderNum})";
-                result = mdb.Add(sql);
+                MessageBox.Show("工单号不能为空！");
+                return;
             }
-            //如果成功更新第账号权限条数据，用于更新记录上一次使用的数据
-            if (result) 
-            {
-                Form3Entity form3Entity = new Form3Entity();
-                form3Entity.GDH = orderNo;
-                form3Entity.GDSL = int.Parse(orderNum);
-                form3Entity.CZY = oper;
 
-                ValueSelected?.Invoke(form3Entity);
-                this.Close();
+            if (string.IsNullOrWhiteSpace(oper))
+            {
+                MessageBox.Show("操作员不能为空！");
+                return;
             }
-            else
+
+            if (!_workOrderHistoryStore.SaveRecentOrder(orderNo, oper, orderQuantity))
             {
                 MessageBox.Show("切换失败");
+                return;
             }
-            
+
+            ValueSelected?.Invoke(new Form3Entity
+            {
+                GDH = orderNo,
+                GDSL = orderQuantity,
+                CZY = oper
+            });
+            Close();
         }
 
-
-        private void AddComboBoxItems(ComboBox comboBox, DataTable datas, int limit=8)
+        private static void AddComboBoxItems(ComboBox comboBox, IEnumerable<Form3Entity> orders)
         {
-            foreach (DataRow row in datas.Rows)
+            foreach (Form3Entity order in orders)
             {
-                if (limit-- == 0) break;
-                string text = $"{row["OrderNo"]};{row["Operator"]};{row["OrderNum"]}";
-                comboBox.Items.Add(text);
+                comboBox.Items.Add($"{order.GDH};{order.CZY};{order.GDSL}");
             }
         }
 
@@ -109,10 +93,10 @@ namespace MesDatas.Views
             {
                 OrderNum.Text = "";
                 OrderNo.Text = "";
-                Operator.Text = "";
+                Operator.Text = Global.Instance.LoginMessage.WorkId;
                 OrderNum.ReadOnly = false;
                 OrderNo.ReadOnly = false;
-                Operator.ReadOnly = false;
+                Operator.ReadOnly = true;
                 DeleteOrder.Visible = false;
                 return;
             }
@@ -121,16 +105,9 @@ namespace MesDatas.Views
             int cursor = comboBox.SelectionStart;
             comboBox.Items.Clear();
             comboBox.SelectionStart = cursor;
-            string sql = $"select * from ChangeOrder where OrderNo = '{comboBox.Text}' and Operator='{Operator.Text}'";
-            DataTable orderNums = mdb.Find(sql);
-            if(orderNums.Rows.Count == 0)
-            {
-                sql = $"select * from ChangeOrder where OrderNo like '{comboBox.Text}%' and Operator='{Operator.Text}'";
-                orderNums = mdb.Find(sql);
-                comboBox.SelectionStart = cursor;
-            }
-            AddComboBoxItems(comboBox, orderNums);
-            if (orderNums.Rows.Count != 0)
+            List<Form3Entity> orders = _workOrderHistoryStore.GetRecentOrders(Operator.Text, text);
+            AddComboBoxItems(comboBox, orders);
+            if (orders.Count != 0)
             {
                 comboBox.SelectedIndex = -1;
                 comboBox.DroppedDown = true;
@@ -159,12 +136,13 @@ namespace MesDatas.Views
 
         private void DeleteOrder_Click(object sender, EventArgs e)
         {
-            string sql = $"delete from ChangeOrder where OrderNo='{OrderNo.Text}' and Operator='{Operator.Text}' and OrderNum={OrderNum.Text}";
-            if (mdb.Del(sql))
+            int orderQuantity;
+            int.TryParse(OrderNum.Text, out orderQuantity);
+            if (_workOrderHistoryStore.DeleteOrder(OrderNo.Text, Operator.Text, orderQuantity))
             {
                 OrderNum.Text = "";
                 OrderNo.Text = "";
-                Operator.Text = "";
+                Operator.Text = Global.Instance.LoginMessage.WorkId;
                 History.Items.Clear();
                 History.Text = "";
                 DeleteOrder.Visible = false;
@@ -181,9 +159,9 @@ namespace MesDatas.Views
             if (comboBox.Text == "")
             {
                 comboBox.Items.Clear();
-                string sql = $"select * from ChangeOrder where Operator='{Global.Instance.LoginMessage.WorkId}'";
-                DataTable datas = mdb.Find(sql);
-                AddComboBoxItems(comboBox, datas);
+                AddComboBoxItems(
+                    comboBox,
+                    _workOrderHistoryStore.GetRecentOrders(Global.Instance.LoginMessage.WorkId));
             }
         }
     }

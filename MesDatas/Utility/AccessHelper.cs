@@ -150,6 +150,51 @@ namespace MesDatas.Utility
         }
 
         /// <summary>
+        /// 在同一事务中依次执行多条SQL。
+        /// </summary>
+        public bool ExecuteTransaction(params string[] sqlStatements)
+        {
+            if (myConn == null || sqlStatements == null || sqlStatements.Length == 0)
+            {
+                return false;
+            }
+
+            OleDbTransaction transaction = null;
+            try
+            {
+                transaction = myConn.BeginTransaction();
+                foreach (string sql in sqlStatements)
+                {
+                    if (string.IsNullOrWhiteSpace(sql)) continue;
+
+                    using (OleDbCommand command = new OleDbCommand(sql, myConn, transaction))
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                }
+
+                transaction.Commit();
+                return true;
+            }
+            catch
+            {
+                try
+                {
+                    transaction?.Rollback();
+                }
+                catch
+                {
+                    // 回滚失败时仍向调用方返回事务失败。
+                }
+                return false;
+            }
+            finally
+            {
+                transaction?.Dispose();
+            }
+        }
+
+        /// <summary>
         /// 删除记录
         /// </summary>
         /// <param name="sql"></param>

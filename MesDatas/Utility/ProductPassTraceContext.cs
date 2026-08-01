@@ -13,7 +13,10 @@ namespace MesDatas.Utility
         [ThreadStatic]
         private static string _currentTraceId;
 
+        private readonly object _syncRoot = new object();
         private readonly Stopwatch _totalWatch;
+        private bool _completed;
+        private bool _pendingError;
 
         /// <summary>
         /// 当前线程正在处理的产品过站 TraceId，供 MES 工具类记录同一链路。
@@ -83,7 +86,16 @@ namespace MesDatas.Utility
         /// 写入一行统一流程日志：同一行「时间 消息」同时落 UI 与产品过站文件，逐字一致。
         /// </summary>
         /// <param name="message">不含时间戳的消息；为空时两侧都写一个空行（流程间分隔）。</param>
-        private static void WriteFlow(string message)
+        private void WriteFlow(string message)
+        {
+            lock (_syncRoot)
+            {
+                if (_completed) return;
+                WriteFlowCore(message);
+            }
+        }
+
+        private void WriteFlowCore(string message)
         {
             string line = string.IsNullOrEmpty(message)
                 ? string.Empty
@@ -103,13 +115,13 @@ namespace MesDatas.Utility
         public void LogFlowBlank() => WriteFlow(null);
 
         /// <summary>
-        /// 记录一个带耗时的流程节点：<c>{label}，耗时=Xms{suffix}</c>。
+        /// 记录一个带耗时的流程节点：<c>{label}{suffix}，耗时=Xms</c>。
         /// </summary>
         public void LogFlowElapsed(string label, Stopwatch watch, string suffix = null)
         {
             if (watch == null) return;
             if (watch.IsRunning) watch.Stop();
-            WriteFlow($"{label}，耗时={watch.ElapsedMilliseconds}ms{suffix}");
+            WriteFlow($"{label}{suffix}，耗时={watch.ElapsedMilliseconds}ms");
         }
 
         /// <summary>
@@ -117,19 +129,59 @@ namespace MesDatas.Utility
         /// </summary>
         public void LogFlowElapsedMs(string label, long elapsedMs, string suffix = null)
         {
-            WriteFlow($"{label}，耗时={elapsedMs}ms{suffix}");
+            WriteFlow($"{label}{suffix}，耗时={elapsedMs}ms");
         }
 
+
         /// <summary>
-        /// 记录一个阶段失败：<c>{label}，失败原因：{reason}{suffix}</c>。
+        /// 记录 PLC 反馈成功，并结束本次产品过站日志块。
         /// </summary>
-        public void LogFlowFailure(string label, string reason, string suffix = null)
+        public void CompleteFeedback(bool passed, short value)
         {
-            WriteFlow($"{label}，失败原因：{reason}{suffix}");
+            lock (_syncRoot)
+            {
+                if (_completed) return;
+
+                string result = passed ? "产品过站成功" : "产品过站失败";
+                CompleteCore($"{result}，反馈{FeedbackPoint}={value}，总耗时={_totalWatch.ElapsedMilliseconds}ms");
+            }
+        }
+
+        public void LogFeedbackWriteFailed(bool passed, short value, bool canRetry)
+        {
+            lock (_syncRoot)
+            {
+                if (_completed) return;
+
+                string result = passed ? "产品过站成功" : "产品过站失败";
+                WriteFlowCore($"{result}，但反馈{FeedbackPoint}={value}写入失败，总耗时={_totalWatch.ElapsedMilliseconds}ms");
+                if (!canRetry)
+                    CompleteCore(null);
+            }
+        }
+
+        public void CompleteWithoutFeedback(bool passed)
+        {
+            lock (_syncRoot)
+            {
+                if (_completed) return;
+
+                string result = passed ? "产品过站成功" : "产品过站失败";
+                CompleteCore($"{result}，未反馈，总耗时={_totalWatch.ElapsedMilliseconds}ms");
+            }
+        }
+
+        internal void HandOffToError()
+        {
+            lock (_syncRoot)
+            {
+                if (!_completed)
+                    _pendingError = true;
+            }
         }
 
         /// <summary>
-        /// 记录非流程的诊断/排错信息到『数据异常』区（带时间戳，traceId 由当前线程上下文自动带上）。
+        /// 记录非流程的诊断/排错信息到数据异常日志。
         /// </summary>
         public void Diag(string action, string message, Exception ex = null)
         {
@@ -141,8 +193,21 @@ namespace MesDatas.Utility
         /// </summary>
         public void Finish(string barcode, string result)
         {
-            if (_totalWatch.IsRunning) _totalWatch.Stop();
-            LogFlowBlank();
+            lock (_syncRoot)
+            {
+                if (_completed || _pendingError) return;
+                CompleteCore($"产品过站失败，未反馈，总耗时={_totalWatch.ElapsedMilliseconds}ms");
+            }
+        }
+
+        private void CompleteCore(string finalMessage)
+        {
+            if (!string.IsNullOrEmpty(finalMessage))
+                WriteFlowCore(finalMessage);
+
+            _totalWatch.Stop();
+            _completed = true;
+            WriteFlowCore(string.Empty);
         }
 
         private sealed class TraceScope : IDisposable

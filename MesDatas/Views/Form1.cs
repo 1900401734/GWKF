@@ -41,6 +41,9 @@ namespace MesDatas.Views
         private const int MaxTorqueAckTimeoutSeconds = 60;                   // 过大会导致扭力转发锁长时间占用
         private const int TorqueAckInitialTimeoutMs = 3000;                  // PLC接收扭力ACK初始等待时间
         private const int TorqueAckPollIntervalMs = 50;                      // ACK轮询间隔，避免错过PLC短暂置位
+        private const int TorqueInterlockWriteIntervalMs = 1000;             // 互锁信号正常写入周期
+        private const int TorqueInterlockRetryDelayMs = 100;                 // 快速失败时最小退避，避免空转
+        private const int TorqueInterlockAlarmThresholdMs = 10000;           // 连续失败达到10秒后报警
         private const int WeightMesStatusCacheLoadDays = 7;                  // 启动时加载最近Weight MES状态，覆盖周末和短期停机重启
         private const int WeightMesStatusCacheRetentionDays = 30;            // 轻量缓存保留天数，避免本地文件长期堆积
         private const int ProductionUiLogMaxLines = 500;                       // 限制生产日志控件体积，避免切页和重绘卡顿
@@ -154,14 +157,14 @@ namespace MesDatas.Views
             // 写设备名称
             SetDeviceName();
 
+            // 设置工单信息，避免后台任务启动时读取到空工单。
+            SetOrderMessage();
+
             // 启动永久任务
             StartPermanentTask();
 
             // 启动动态任务
             SetDynamicTaskStart();
-
-            // 设置工单信息
-            SetOrderMessage();
 
             // 初始化所有需要维护的表格
             InitDataGirdView();
@@ -355,13 +358,12 @@ namespace MesDatas.Views
         /// </summary>
         private void SetOrderMessage()
         {
-            // 选取最近更新的工单信息
-            string sql = $"SELECT TOP 1 * FROM ChangeOrder WHERE Operator='{Global.Instance.LoginMessage.WorkId}' ORDER BY id DESC";
-            DataTable order = curDb.Find(sql);
             txtUser.Text = Global.Instance.LoginMessage.WorkId;
-            if (order.Rows.Count != 1) return;
-            OrderNo.Text = order.Rows[0]["OrderNo"].ToString();
-            OrderNum.Text = order.Rows[0]["OrderNum"].ToString();
+            Form3Entity order = new WorkOrderHistoryStore(curDb).GetLatestOrder();
+            if (order == null) return;
+
+            OrderNo.Text = order.GDH;
+            OrderNum.Text = order.GDSL.ToString();
         }
 
         /// <summary>
@@ -2103,32 +2105,49 @@ namespace MesDatas.Views
                         btnManualInputBarcode.ExecuteSafely(c => c.Visible = false);
                     }
 
+                    RouteCheckTraceContext routeCheckTrace = null;
                     try
                     {
-                        Log4netHelper.LogRouteCheck("SCAN_TRIGGER", "检测到扫码读码信号", new Dictionary<string, object>
+                        if (barcodeType == 2)
                         {
-                            { "address", addrInfo.HasBarcodeTag },
-                            { "value", 1 }
-                        });
+                            Log4netHelper.LogRouteCheck("SCAN_TRIGGER", "检测到扫码读码信号", new Dictionary<string, object>
+                            {
+                                { "address", addrInfo.HasBarcodeTag },
+                                { "value", 1 }
+                            });
+                        }
+                        else
+                        {
+                            routeCheckTrace = RouteCheckTraceContext.Start(
+                                addrInfo.HasBarcodeTag,
+                                addrInfo.BarcodeVerifyTag,
+                                line => rtbReadBarCode.AppendRaw(line));
+                            routeCheckTrace.LogFlow($"PLC触发流程检查，{routeCheckTrace.TriggerAddress}=1");
+                        }
 
                         // 首先清除触发信号
                         _readWriteNet.Write(addrInfo.HasBarcodeTag, 0);
-                        Log4netHelper.LogRouteCheck("SCAN_TRIGGER_CLEAR", "清除扫码读码信号", new Dictionary<string, object>
+                        if (barcodeType == 2)
                         {
-                            { "address", addrInfo.HasBarcodeTag },
-                            { "value", 0 }
-                        });
+                            Log4netHelper.LogRouteCheck("SCAN_TRIGGER_CLEAR", "清除扫码读码信号", new Dictionary<string, object>
+                            {
+                                { "address", addrInfo.HasBarcodeTag },
+                                { "value", 0 }
+                            });
 
-                        rtbReadBarCode.AppendToComponent($"监测到来自'{addrInfo.HasBarcodeTag}'的信号:{triggerValue}");
+                            rtbReadBarCode.AppendToComponent($"监测到来自'{addrInfo.HasBarcodeTag}'的信号:{triggerValue}");
+                        }
 
-                        HandlePlcScanRequest(barcodeType);
+                        HandlePlcScanRequest(barcodeType, routeCheckTrace);
 
-                        rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理完成");
+                        if (barcodeType == 2)
+                            rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理完成");
                     }
                     catch (Exception e)
                     {
-                        HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"扫码读取异常:${e.Message}");
-                        rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理异常");
+                        HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"扫码读取异常:${e.Message}", routeCheckTrace: routeCheckTrace);
+                        if (barcodeType == 2)
+                            rtbReadBarCode.AppendToComponent($"来自'{addrInfo.HasBarcodeTag}'的信号处理异常");
                     }
                 }
                 else
@@ -2153,7 +2172,7 @@ namespace MesDatas.Views
         /// 处理PLC扫码请求的核心业务逻辑
         /// </summary>
         /// <param name="barcodeType">条码类型 1=产品条码  2=工装条码</param>
-        private void HandlePlcScanRequest(int barcodeType)
+        private void HandlePlcScanRequest(int barcodeType, RouteCheckTraceContext routeCheckTrace)
         {
             lock (_lockObject)
             {
@@ -2167,16 +2186,23 @@ namespace MesDatas.Views
                 ushort barcodeLength = Convert.ToUInt16(addrInfo.PlcScannedBarcodeLength);
                 if (!TryReadStringValue(addrInfo.PlcScannedBarcode, barcodeLength, out string scannedBarcode))
                 {
-                    HandleError(addrInfo.BarcodeVerifyTag, 2, true, "无法读取PLC条码信息，请检查连接");
+                    HandleError(addrInfo.BarcodeVerifyTag, 2, true, "无法读取PLC条码信息，请检查连接", routeCheckTrace: routeCheckTrace);
                     return;
                 }
 
-                rtbReadBarCode.AppendToComponent($"读取条码{scannedBarcode}");
-                Log4netHelper.LogRouteCheck("BARCODE_READ", "读取到PLC条码", new Dictionary<string, object>
+                if (barcodeType == 2)
                 {
-                    { "address", addrInfo.PlcScannedBarcode },
-                    { "barcode", scannedBarcode }
-                });
+                    rtbReadBarCode.AppendToComponent($"读取条码{scannedBarcode}");
+                    Log4netHelper.LogRouteCheck("BARCODE_READ", "读取到PLC条码", new Dictionary<string, object>
+                    {
+                        { "address", addrInfo.PlcScannedBarcode },
+                        { "barcode", scannedBarcode }
+                    });
+                }
+                else
+                {
+                    routeCheckTrace?.LogFlow($"条码读取成功，条码={scannedBarcode}");
+                }
 
                 // --- 3. 业务分支：工装条码 (Type 2) ---
                 if (barcodeType == 2)  // 560220-01621-DP-V01-002
@@ -2190,7 +2216,7 @@ namespace MesDatas.Views
                 // 4a. 本地校验 1：产品型号校验 (如果启用)
                 if (EnableTypeChangedVerify.Checked)
                 {
-                    if (!VerifyProductModelMatch(scannedBarcode)) return;
+                    if (!VerifyProductModelMatch(scannedBarcode, routeCheckTrace)) return;
                 }
 
                 // 更新UI显示当前条码
@@ -2200,7 +2226,7 @@ namespace MesDatas.Views
                 if (EnableBarcodeRuleVerify.Checked && BarcodeRule.Text != "" && scannedBarcode.IndexOf(BarcodeRule.Text, StringComparison.Ordinal) < 1)
                 {
                     // 如果在条码中“找不到规则字符串”(-1)，或者“规则字符串在最开头”(0)，则视为校验失败。
-                    HandleBarcodeRuleMismatch();
+                    HandleBarcodeRuleMismatch(routeCheckTrace);
                     return;
                 }
 
@@ -2215,7 +2241,7 @@ namespace MesDatas.Views
                 // 启用拼板条码
                 if (EnableGetNextBoard.Checked)
                 {
-                    if (!TryGetPanelizationBarcodes(ref PrdSNInfo, scannedBarcode)) return;
+                    if (!TryGetPanelizationBarcodes(ref PrdSNInfo, scannedBarcode, routeCheckTrace)) return;
                 }
 
                 #endregion
@@ -2230,7 +2256,7 @@ namespace MesDatas.Views
                 // 4d. MES校验2：流程检查 (如果启用)
                 if (EnableFluentVerify.Checked)
                 {
-                    if (!CheckRouteWithMes(ref snList, ref snCollection, scannedBarcode))
+                    if (!CheckRouteWithMes(ref snList, ref snCollection, scannedBarcode, routeCheckTrace))
                     {
                         return;
                     }
@@ -2238,23 +2264,27 @@ namespace MesDatas.Views
                     // (如果启用了拼板，则把另一个条码发给PLC)
                     if (EnableGetNextBoard.Checked)
                     {
-                        if (!TrySendAnotherBarcodeToPlc(snList, scannedBarcode))
+                        if (!TrySendAnotherBarcodeToPlc(snList, scannedBarcode, routeCheckTrace))
                             return;
                     }
 
                     // 通知PLC继续生产
-                    _readWriteNet.Write($"{addrInfo.BarcodeVerifyTag}", 1);
-                    Log4netHelper.LogRouteCheck("ROUTE_PASS_FEEDBACK", "流程检查成功，通知PLC继续生产", new Dictionary<string, object>
+                    OperateResult feedbackResult = _readWriteNet.Write(addrInfo.BarcodeVerifyTag, 1);
+                    if (feedbackResult.IsSuccess)
                     {
-                        { "barcode", scannedBarcode },
-                        { "feedback", addrInfo.BarcodeVerifyTag },
-                        { "value", 1 }
-                    });
+                        routeCheckTrace?.CompleteFeedback(passed: true, value: 1);
+                    }
+                    else
+                    {
+                        routeCheckTrace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
+                        Log4netHelper.LogDataException("ROUTE_PASS_FEEDBACK_FAILED",
+                            $"流程检查通过，但写入PLC地址 {addrInfo.BarcodeVerifyTag}=1 失败：{feedbackResult.Message}");
+                    }
                 }
                 else
                 {
                     // 如果不启用流程检查，则直接向PLC反馈OK
-                    BypassRouteCheck(scannedBarcode);
+                    BypassRouteCheck(scannedBarcode, routeCheckTrace);
                 }
 
                 #endregion
@@ -2297,7 +2327,7 @@ namespace MesDatas.Views
         /// </summary>
         /// <param name="scannedBarcode">扫码枪读取到的完整条码字符串</param>
         /// <returns>验证通过返回 true，失败（包括数据库无记录或不匹配）返回 false</returns>
-        private bool VerifyProductModelMatch(string scannedBarcode)
+        private bool VerifyProductModelMatch(string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             // 1.获取运行界面中当前生产的产品型号
             string currentModel = txtProductModel.GetPropertySafely(c => c.Text);
@@ -2305,7 +2335,7 @@ namespace MesDatas.Views
             // 2.[参数校验]如果界面没选型号，直接报错
             if (string.IsNullOrEmpty(currentModel))
             {
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "未选择产品型号，无法进行校验");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "未选择产品型号，无法进行校验", routeCheckTrace: routeCheckTrace);
             }
 
             // 3.查询该型号对应的条码匹配规则
@@ -2317,7 +2347,7 @@ namespace MesDatas.Views
             // 5. [空值检查] 如果数据库没查到该型号的配置，视为校验失败
             if (matchTable == null || matchTable.Rows.Count == 0)
             {
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"数据库中未找到型号[{currentModel}]的条码规则配置");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"数据库中未找到型号[{currentModel}]的条码规则配置", routeCheckTrace: routeCheckTrace);
             }
 
             // 6. [规则遍历] 遍历查到的所有匹配规则（可能该型号支持多种条码格式）
@@ -2347,18 +2377,18 @@ namespace MesDatas.Views
 
             // 9. [失败处理] 循环结束仍未匹配，调用错误处理方法
             // 通知 PLC (写入NG信号) 并记录错误日志
-            return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"条码{scannedBarcode}产品型号验证不通过");
+            return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"条码{scannedBarcode}产品型号验证不通过", routeCheckTrace: routeCheckTrace);
         }
 
         /// <summary>
         /// 处理本地条码规则校验失败的逻辑。
         /// </summary>
-        private void HandleBarcodeRuleMismatch()
+        private void HandleBarcodeRuleMismatch(RouteCheckTraceContext routeCheckTrace)
         {
             lblRunningStatus.ExecuteSafely(c =>
                 { c.Text = "验证失败、条码规则验证失败！"; c.ForeColor = Color.Red; });
 
-            HandleError(addrInfo.BarcodeVerifyTag, 2, isBlockingError: true, userMessage: "验证失败、条码规则验证失败！");
+            HandleError(addrInfo.BarcodeVerifyTag, 2, isBlockingError: true, userMessage: "验证失败、条码规则验证失败！", routeCheckTrace: routeCheckTrace);
 
             //readWriteNet.Write($"{plcAddress.BarcodeVerifyTag}", 2);
             //LogMsg($"判断条码规则【{plcAddress.BarcodeVerifyTag}】 = 2");
@@ -2370,7 +2400,7 @@ namespace MesDatas.Views
         /// <param name="prdSNs">传入已扫到的子板条码，传出MES返回的完整拼板列表</param>
         /// <param name="scannedBarcode">当前扫码枪读取到的条码</param>
         /// <returns>true 表示成功, false 表示失败 (内部已调用 HandleError)</returns>
-        private bool TryGetPanelizationBarcodes(ref List<PrdSNs> prdSNs, string scannedBarcode)
+        private bool TryGetPanelizationBarcodes(ref List<PrdSNs> prdSNs, string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             GetBarCodeInputParameter inputParam = new GetBarCodeInputParameter
             {
@@ -2378,44 +2408,46 @@ namespace MesDatas.Views
                 PrdSN = scannedBarcode
             };
 
+            Stopwatch mesWatch = Stopwatch.StartNew();
             GetBarCodeReturnParameter mesResponse = _request.GetResponseSerializeResult<GetBarCodeReturnParameter, GetBarCodeInputParameter>
                 (UrlPanelization.Text, _httpClient, "GETPRDSNGROUP", inputParam, "获取拼版");
+            routeCheckTrace?.LogElapsed("拼版MES请求-响应完成", mesWatch);
 
             // 1. 处理接口连接失败
             if (mesResponse == null)
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_NULL", "连接错误，无法获取拼版条码", new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("PANELIZATION_NULL", "连接错误，无法获取拼版条码", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", "NULL" }
                 }, level: "ERROR");
 
                 return HandleError(
-                    addrInfo.BarcodeVerifyTag, 2, true, "连接错误，无法获取拼版条码");
+                    addrInfo.BarcodeVerifyTag, 2, true, "连接错误，无法获取拼版条码", routeCheckTrace: routeCheckTrace);
             }
 
             // 2. 处理MES返回FAIL
             if (mesResponse.Result.Equals(nameof(MyEnum.Result.FAIL), StringComparison.OrdinalIgnoreCase))
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("PANELIZATION_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", mesResponse.Result }
                 }, level: "WARN");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"获取拼版条码错误:{mesResponse.ErrorMessage}");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"获取拼版条码错误:{mesResponse.ErrorMessage}", routeCheckTrace: routeCheckTrace);
             }
 
             // 3. 处理MES返回PASS，但数据不合规（如非拼板）
             if (mesResponse.PrdSNInfo.PrdSNs.Count <= 1)
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_EMPTY", "获取拼版接口验证通过但没返回拼版条码", new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("PANELIZATION_EMPTY", "获取拼版接口验证通过但没返回拼版条码", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", mesResponse.Result }
                 }, level: "WARN");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "获取拼版接口验证通过但没返回拼版条码");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "获取拼版接口验证通过但没返回拼版条码", routeCheckTrace: routeCheckTrace);
             }
 
             // 4. MES 返回 Pass 且数据合规
@@ -2423,7 +2455,7 @@ namespace MesDatas.Views
 
             // 更新拼板列表
             prdSNs = mesResponse.PrdSNInfo.PrdSNs;
-            Log4netHelper.LogRouteCheck("PANELIZATION_PASS", "拼版条码获取成功", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("PANELIZATION_PASS", "拼版条码获取成功", new Dictionary<string, object>
             {
                 { "barcode", scannedBarcode },
                 { "count", prdSNs.Count }
@@ -2438,7 +2470,7 @@ namespace MesDatas.Views
         /// <param name="snCollection">子板条码集合，不包含子板序号。这是对snList的封装</param>
         /// <param name="scannedBarcode">从PLC获取的条码</param>
         /// <returns>true 表示成功, false 表示失败 (内部已调用 HandleError)</returns>
-        private bool CheckRouteWithMes(ref List<string> snList, ref PrdSNCollection snCollection, string scannedBarcode)
+        private bool CheckRouteWithMes(ref List<string> snList, ref PrdSNCollection snCollection, string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             // ----------- 1.构造MES接口输入参数 -----------
 
@@ -2453,17 +2485,17 @@ namespace MesDatas.Views
 
             // ----------- 2.调用MES流程检查接口 -----------
 
-            rtbReadBarCode.AppendToComponent($"开始访问MES流程检查{scannedBarcode}");
+            Stopwatch mesWatch = Stopwatch.StartNew();
             RouteCheckReturnParam mesResponse = _request.GetResponseSerializeResult<RouteCheckReturnParam,
                                                 RouteCheckInputParam>(Url_RouteCheck.Text, _httpClient, "CHECKROUTE", inputParam, "流程检查");
-            rtbReadBarCode.AppendToComponent($"收到MES流程检查反馈{scannedBarcode}");
+            routeCheckTrace?.LogElapsed("流程检查MES请求-响应完成", mesWatch);
 
             // ----------- 3.处理MES接口返回结果 -----------
 
             // 3a.接口连接失败
             if (mesResponse == null)
             {
-                Log4netHelper.LogRouteCheck("CHECKROUTE_NULL", "访问接口错误，无法进行流程检查", new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("CHECKROUTE_NULL", "访问接口错误，无法进行流程检查", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", "NULL" }
@@ -2471,19 +2503,19 @@ namespace MesDatas.Views
 
                 rtbErrorLog.AppendToComponent("访问接口错误，无法进行流程检查");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "访问接口错误，无法进行流程检查（返回null）");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, "访问接口错误，无法进行流程检查（返回null）", routeCheckTrace: routeCheckTrace);
             }
 
             // 3b.MES返回FAIL
             if (mesResponse.Result.Equals(nameof(MyEnum.Result.FAIL), StringComparison.OrdinalIgnoreCase))
             {
-                Log4netHelper.LogRouteCheck("CHECKROUTE_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
+                Log4netHelper.LogMesInteraction("CHECKROUTE_FAIL", mesResponse.ErrorMessage, new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode },
                     { "result", mesResponse.Result }
                 }, level: "WARN");
 
-                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"流程检查:{mesResponse.ErrorMessage}");
+                return HandleError(addrInfo.BarcodeVerifyTag, 2, true, $"流程检查:{mesResponse.ErrorMessage}", routeCheckTrace: routeCheckTrace);
             }
 
             // 3c.MES返回PASS
@@ -2498,47 +2530,54 @@ namespace MesDatas.Views
         /// <param name="snList"></param>
         /// <param name="scannedBarcode"></param>
         /// <returns></returns>
-        private bool TrySendAnotherBarcodeToPlc(List<string> snList, string scannedBarcode)
+        private bool TrySendAnotherBarcodeToPlc(List<string> snList, string scannedBarcode, RouteCheckTraceContext routeCheckTrace)
         {
             // 从拼版列表中找到与当前扫描条码不同的另一个条码
             var anotherBarcode = snList.FirstOrDefault(x => x != scannedBarcode);
 
             if (string.IsNullOrWhiteSpace(anotherBarcode))
             {
-                Log4netHelper.LogRouteCheck("PANELIZATION_SEND_EMPTY", "流程检查成功，但是查找的拼版结果为空，无法发送到PLC", new Dictionary<string, object>
+                Log4netHelper.LogDataException("PANELIZATION_SEND_EMPTY", "流程检查成功，但是查找的拼版结果为空，无法发送到PLC", new Dictionary<string, object>
                 {
                     { "barcode", scannedBarcode }
                 }, level: "WARN");
 
-                return HandleError(null, 2, false, "流程检查：无法将拼版条码发送给PLC");
+                return HandleError(null, 2, false, "流程检查：无法将拼版条码发送给PLC", routeCheckTrace: routeCheckTrace);
             }
 
             OperateResult result = _readWriteNet.Write(addrInfo.PanalizationBarcode, anotherBarcode);
-            Log4netHelper.LogRouteCheck("PANELIZATION_SEND", "拼版条码已发送至PLC", new Dictionary<string, object>
+            Log4netHelper.LogDataException(
+                result.IsSuccess ? "PANELIZATION_SEND" : "PANELIZATION_SEND_FAILED",
+                result.IsSuccess ? "拼版条码已发送至PLC" : "拼版条码写入PLC失败",
+                new Dictionary<string, object>
             {
                 { "barcode", scannedBarcode },
                 { "anotherBarcode", anotherBarcode },
                 { "address", addrInfo.PanalizationBarcode },
-                { "success", result.IsSuccess }
-            });
+                { "success", result.IsSuccess },
+                { "message", result.Message }
+            }, level: result.IsSuccess ? "INFO" : "ERROR");
             return true;
         }
 
         /// <summary>
         /// 在未勾选流程检查时，直接向PLC反馈OK。
         /// </summary>
-        private void BypassRouteCheck(string readPlcSn)
+        private void BypassRouteCheck(string readPlcSn, RouteCheckTraceContext routeCheckTrace)
         {
             lblRunningStatus.ExecuteSafely(c => { c.Text = "跳过流程检查成功!"; c.ForeColor = Color.Green; });
 
-            _readWriteNet.Write($"{addrInfo.BarcodeVerifyTag}", 1);
-
-            Log4netHelper.LogRouteCheck("ROUTE_CHECK_BYPASS", "跳过条码验证并反馈PLC", new Dictionary<string, object>
+            OperateResult feedbackResult = _readWriteNet.Write(addrInfo.BarcodeVerifyTag, 1);
+            if (feedbackResult.IsSuccess)
             {
-                { "barcode", readPlcSn },
-                { "feedback", addrInfo.BarcodeVerifyTag },
-                { "value", 1 }
-            });
+                routeCheckTrace?.CompleteFeedback(passed: true, value: 1, skipped: true);
+            }
+            else
+            {
+                routeCheckTrace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
+                Log4netHelper.LogDataException("ROUTE_BYPASS_FEEDBACK_FAILED",
+                    $"流程检查已跳过，但写入PLC地址 {addrInfo.BarcodeVerifyTag}=1 失败：{feedbackResult.Message}");
+            }
         }
 
         #endregion
@@ -2597,25 +2636,20 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"数据准备就绪，{uploadManager.triggerPoint}={triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 触发数据上传信号：{uploadManager.triggerPoint} = {triggerValue}");
-
                         lock (_barcodeLock)
                         {
-                            var prdSN = GetProductResult(uploadManager, scannedBarcodeList, ProductResultList, trace);
-
-                            UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传处理完成：{prdSN}");
+                            GetProductResult(uploadManager, scannedBarcodeList, ProductResultList, trace);
                         }
 
                     }
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传发生异常：{ex}");
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
 
                         // 直接用新对象，防止值为null
                         scannedBarcodeList = new List<string>();
@@ -2675,21 +2709,16 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"数据准备就绪，{uploadManager.triggerPoint}={triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 监听到触发数据上传信号：{uploadManager.triggerPoint} = {triggerValue}");
-
-                        var prdSN = GetProductResult(uploadManager, new List<string>(), new List<string>(), trace);
-
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传流程处理完成：{prdSN}");
+                        GetProductResult(uploadManager, new List<string>(), new List<string>(), trace);
                     }
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传流程发生异常：{ex}");
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
                     }
                 }
             }
@@ -2745,21 +2774,16 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"数据准备就绪，{uploadManager.triggerPoint}={triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 监听到触发数据上传信号：{uploadManager.triggerPoint} = {triggerValue}");
-
-                        var prdSN = GetProductResult(uploadManager, new List<string>(), new List<string>(), trace);
-
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传流程处理完成：{prdSN}");
+                        GetProductResult(uploadManager, new List<string>(), new List<string>(), trace);
                     }
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传流程发生异常：{ex}");
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
                     }
                 }
             }
@@ -2815,21 +2839,16 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"数据准备就绪，{uploadManager.triggerPoint}={triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 监听到触发数据上传信号：{uploadManager.triggerPoint} = {triggerValue}");
-
-                        var prdSN = GetProductResult(uploadManager, new List<string>(), new List<string>(), trace);
-
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传流程处理完成：{prdSN}");
+                        GetProductResult(uploadManager, new List<string>(), new List<string>(), trace);
                     }
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        UploadMes.AppendToComponent($"[{uploadManager.Name}] 数据上传流程发生异常：{ex}");
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
                     }
                 }
             }
@@ -2857,7 +2876,7 @@ namespace MesDatas.Views
                     for (int i = 0; i < scannedBarcodeList.Count; i++)
                     {
                         productResultList.Add("3");
-                        UploadMes.AppendToComponent($"条码{i + 1}：{scannedBarcodeList[i]}");
+
                     }
                 }
                 else
@@ -2866,9 +2885,8 @@ namespace MesDatas.Views
                     if (!TryReadInt16Value(uploadEntity.ProductResult, out int ProductResult))
                     {
                         var log = $"[{uploadEntity.Name}] 产品结果读取失败({uploadEntity.ProductResult})，请检查PLC连接";
-                        trace?.LogFlowFailure("读取产品信息", $"产品结果读取失败({uploadEntity.ProductResult})，请检查PLC连接");
                         traceResult = "产品结果读取失败";
-                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log, productPassTrace: trace);
                         UploadMes.AppendToComponent(log);
                         return prdSN;
                     }
@@ -2878,9 +2896,8 @@ namespace MesDatas.Views
                     if (!TryReadStringValue(uploadEntity.BarcodeToUpload, uploadEntity.BarcodeToUploadLength, out prdSN))
                     {
                         var log = $"[{uploadEntity.Name}] 产品条码读取失败({uploadEntity.BarcodeToUpload})，请检查PLC连接";
-                        trace?.LogFlowFailure("读取产品信息", $"产品条码读取失败({uploadEntity.BarcodeToUpload})，请检查PLC连接");
                         traceResult = "产品条码读取失败";
-                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log, productPassTrace: trace);
                         UploadMes.AppendToComponent(log);
                         return prdSN;
                     }
@@ -2888,14 +2905,13 @@ namespace MesDatas.Views
                     if (string.IsNullOrWhiteSpace(prdSN))
                     {
                         var log = $"[{uploadEntity.Name}] 获取的条码数据为空";
-                        trace?.LogFlowFailure("读取产品信息", "获取的条码数据为空");
                         traceResult = "条码为空";
                         UploadMes.AppendToComponent(log);
-                        HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                         return prdSN;
                     }
 
-                    UploadMes.AppendToComponent($"[{uploadEntity.Name}] 读取到条码：{prdSN}");
+
                     scannedBarcodeList.Add(prdSN);
 
                     // 将读取到的结果写在界面上
@@ -2907,7 +2923,6 @@ namespace MesDatas.Views
 
                 if (scannedBarcodeList.Count == 0)
                 {
-                    trace?.LogFlowFailure("读取产品信息", "未获取到条码");
                     traceResult = "未获取到条码";
                     // 丢给外层捕捉
                     throw new Exception("未获取到条码");
@@ -2916,13 +2931,13 @@ namespace MesDatas.Views
                 string productInfoResult = (EnableUpperTooling.Checked
                         || (productResultList.Count > 0 && productResultList[productResultList.Count - 1] == "3"))
                     ? "OK" : "NG";
-                trace?.LogFlowElapsed("读取产品信息", productInfoWatch, $"，SN={prdSN}，Result={productInfoResult}");
+                trace?.LogFlowElapsed("产品信息读取完成", productInfoWatch, $"，条码={prdSN}，结果={productInfoResult}");
 
                 #endregion
 
                 #region ---------- 动态读取测试项数据 ----------
 
-                UploadMes.AppendToComponent($"[{uploadEntity.Name}] 准备读取测试数据");
+
 
                 var valList = new List<string>();
                 var maxList = new List<string>();
@@ -2934,16 +2949,15 @@ namespace MesDatas.Views
                 if (!TryReadDataByStation(uploadEntity, out dynamic failReason, ref valList, ref maxList, ref minList, ref resList, ref staList))
                 {
                     var log = $"[{uploadEntity.Name}] 读取测试数据异常: {failReason}";
-                    trace?.LogFlowFailure("读测试项完成", $"{failReason}");
                     traceResult = "读取测试数据失败";
-                    HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                    HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                     rtbErrorLog.AppendToComponent(log);
                     return prdSN;
                 }
 
-                trace?.LogFlowElapsed("读测试项完成", testDataWatch);
+                trace?.LogFlowElapsed("测试数据读取完成", testDataWatch);
 
-                UploadMes.AppendToComponent($"[{uploadEntity.Name}] 测试数据读取完成");
+
 
                 #endregion
 
@@ -2956,8 +2970,11 @@ namespace MesDatas.Views
                 if (!EnableResultUpload.Checked)
                 {
                     bool feedbackOk = TryWriteInt16Value(uploadEntity.feedbackPoint, 1);
-                    trace?.LogFlowElapsedMs("数据采集完成", trace.TotalElapsedMs, "，D7116=1");
-                    Log4netHelper.LogProductPass("OFFLINE_BYPASS", "离线模式未上传MES，已按本地结果反馈PLC", new Dictionary<string, object>
+                    if (feedbackOk)
+                        trace?.CompleteFeedback(passed: true, value: 1);
+                    else
+                        trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
+                    Log4netHelper.LogMesInteraction("OFFLINE_BYPASS", "离线模式未上传MES，已按本地结果反馈PLC", new Dictionary<string, object>
                     {
                         { "process", uploadEntity.Name },
                         { "barcode", prdSN },
@@ -2989,20 +3006,19 @@ namespace MesDatas.Views
                     if (!feedbackOk)
                     {
                         string log = $"[{uploadEntity.Name}] 采集完成后反馈{uploadEntity.feedbackPoint}=1失败，请检查PLC连接";
-                        trace?.LogFlowFailure("数据采集完成", $"反馈{uploadEntity.feedbackPoint}=1失败，请检查PLC连接");
+                        trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
                         MarkOutboxPendingRetry(outboxRecord, "PLC_FEEDBACK_FAIL", log);
                         traceResult = "PLC反馈失败";
-                        HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                         UploadMes.AppendToComponent(log);
                         return prdSN;
                     }
-
-                    trace?.LogFlowElapsedMs("数据采集完成", trace.TotalElapsedMs, "，D7116=1");
+                    trace?.CompleteFeedback(passed: true, value: 1);
 
                     _ = StartMesUploadAfterFeedbackAsync(uploadSnapshot, trace, outboxRecord);
                     showResultNow = false;
                     traceResult = "PLC已反馈";
-                    UploadMes.AppendToComponent($"[{uploadEntity.Name}] 采集完成，已反馈{uploadEntity.feedbackPoint}=1，MES后台上传中");
+
                     lblRunningStatus.ExecuteSafely(c => { c.Text = "PLC已反馈，MES后台上传中"; c.ForeColor = Color.Green; });
                 }
                 else
@@ -3014,12 +3030,12 @@ namespace MesDatas.Views
 
                         // ============= 开始上传数据 =============
 
-                        UploadMes.AppendToComponent($"[{uploadEntity.Name}] 开始执行数据上传流程 <-");
+
 
                         // 上传结果到MES（含本地txt、图片等）；请求构造/发起请求/收到响应三行在 SendResultToMes 内记录
                         returnParam = SendResultToMes(scannedBarcodeList, productResultList, valList, maxList, minList, resList, staList, uploadEntity, trace);
 
-                        UploadMes.AppendToComponent($"[{uploadEntity.Name}] -> 数据上传流程执行结束");
+
 
                         // ============= 解析返回来的参数 =============
 
@@ -3034,16 +3050,15 @@ namespace MesDatas.Views
                             if (!feedbackResult.IsSuccess)
                             {
                                 var log = $"[{uploadEntity.Name}] MES已PASS，但反馈{uploadEntity.feedbackPoint}=1失败：{feedbackResult.Message}";
-                                trace?.LogFlowFailure("数据采集完成", $"反馈{uploadEntity.feedbackPoint}=1失败：{feedbackResult.Message}");
-                                traceResult = "D7116写入失败";
-                                HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                                trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
+                                traceResult = "PLC反馈失败";
+                                HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                                 UploadMes.AppendToComponent(log);
                                 return prdSN;
                             }
-
-                            trace?.LogFlowElapsedMs("数据采集完成", trace.TotalElapsedMs, "，D7116=1");
+                            trace?.CompleteFeedback(passed: true, value: 1);
                             traceResult = "PASS";
-                            UploadMes.AppendToComponent($"[{uploadEntity.Name}] 过站成功，反馈{uploadEntity.feedbackPoint} = 1");
+
                             lblRunningStatus.ExecuteSafely(c => { c.Text = "生产结果上传成功"; c.ForeColor = Color.Green; });
                         }
                         else
@@ -3095,18 +3110,17 @@ namespace MesDatas.Views
                             // 根据界面上的设置决定NG显示和阻塞逻辑
                             string operJudge = cboProductMode.GetPropertySafely(c => c.Text);
                             traceResult = "FAIL";
-                            trace?.LogFlowElapsedMs("数据采集完成", trace.TotalElapsedMs, "，D7116=2");
                             trace?.Diag("MES_FAIL", $"MES返回FAIL，程序模式={operJudge}，准备反馈{uploadEntity.feedbackPoint}=2");
                             switch (operJudge)
                             {
                                 case "不显示NG且阻塞":
-                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}");
+                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}", productPassTrace: trace);
                                     return prdSN;
                                 case "显示NG且阻塞":
-                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}");
+                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}", productPassTrace: trace);
                                     break;
                                 case "显示NG且不阻塞":
-                                    HandleError(uploadEntity.feedbackPoint, 2, false, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}");
+                                    HandleError(uploadEntity.feedbackPoint, 2, false, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}", productPassTrace: trace);
                                     break;
                             }
                         }
@@ -3378,7 +3392,7 @@ namespace MesDatas.Views
 
             MesOutboxRecord savedRecord = _mesOutboxStore.Save(record);
             UpdateWeightMesStatus(savedRecord);
-            Log4netHelper.LogProductPass("MES_OUTBOX_CREATE", "先反馈再上传记录已创建，等待MES后台确认", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("MES_OUTBOX_CREATE", "先反馈再上传记录已创建，等待MES后台确认", new Dictionary<string, object>
             {
                 { "traceId", savedRecord?.TraceId },
                 { "process", savedRecord?.ProcessName },
@@ -3411,7 +3425,7 @@ namespace MesDatas.Views
 
             MesOutboxRecord savedRecord = _mesOutboxStore.MarkConfirmedPass(record.RecordId, returnParam?.ErrorMessage);
             UpdateWeightMesStatus(savedRecord);
-            Log4netHelper.LogProductPass("MES_OUTBOX_CONFIRMED_PASS", "MES后台上传已确认PASS", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("MES_OUTBOX_CONFIRMED_PASS", "MES后台上传已确认PASS", new Dictionary<string, object>
             {
                 { "traceId", savedRecord?.TraceId },
                 { "process", savedRecord?.ProcessName },
@@ -3430,7 +3444,7 @@ namespace MesDatas.Views
 
             MesOutboxRecord savedRecord = _mesOutboxStore.MarkConfirmedFail(record.RecordId, errorType, errorMessage);
             UpdateWeightMesStatus(savedRecord);
-            Log4netHelper.LogProductPass("MES_OUTBOX_CONFIRMED_FAIL", "MES后台上传明确失败", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("MES_OUTBOX_CONFIRMED_FAIL", "MES后台上传明确失败", new Dictionary<string, object>
             {
                 { "traceId", savedRecord?.TraceId },
                 { "process", savedRecord?.ProcessName },
@@ -3452,7 +3466,7 @@ namespace MesDatas.Views
 
             MesOutboxRecord savedRecord = _mesOutboxStore.MarkPendingRetry(record.RecordId, errorType, errorMessage);
             UpdateWeightMesStatus(savedRecord);
-            Log4netHelper.LogProductPass("MES_OUTBOX_PENDING_RETRY", "MES后台上传结果未知，等待重试", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("MES_OUTBOX_PENDING_RETRY", "MES后台上传结果未知，等待重试", new Dictionary<string, object>
             {
                 { "traceId", savedRecord?.TraceId },
                 { "process", savedRecord?.ProcessName },
@@ -3474,7 +3488,7 @@ namespace MesDatas.Views
 
             MesOutboxRecord savedRecord = _mesOutboxStore.MarkManualProcessing(record.RecordId, errorType, errorMessage);
             UpdateWeightMesStatus(savedRecord);
-            Log4netHelper.LogProductPass("MES_OUTBOX_MANUAL_PROCESSING", "MES后台上传进入人工处理", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction("MES_OUTBOX_MANUAL_PROCESSING", "MES后台上传进入人工处理", new Dictionary<string, object>
             {
                 { "traceId", savedRecord?.TraceId },
                 { "process", savedRecord?.ProcessName },
@@ -3932,7 +3946,7 @@ namespace MesDatas.Views
         {
             if (uploadEntity == null) return;
 
-            Log4netHelper.LogProductPass(isPass ? "MES_SYNC_CONFIRMED_PASS" : "MES_SYNC_CONFIRMED_FAIL", isPass ? "同步过站成功" : "同步过站失败", new Dictionary<string, object>
+            Log4netHelper.LogMesInteraction(isPass ? "MES_SYNC_CONFIRMED_PASS" : "MES_SYNC_CONFIRMED_FAIL", isPass ? "同步过站成功" : "同步过站失败", new Dictionary<string, object>
             {
                 { "process", uploadEntity.Name },
                 { "barcode", scannedBarcodeList?.FirstOrDefault() },
@@ -3959,6 +3973,7 @@ namespace MesDatas.Views
         {
             MesOutboxRecord mesOutboxRecord = outboxRecord;
             bool useOutboxRecord = !handleMesFailure && mesOutboxRecord != null;
+            Stopwatch httpWatch = null;
 
             // 线程中需要捕获异常，否则会直接退出
             try
@@ -3966,8 +3981,6 @@ namespace MesDatas.Views
                 // 获取当前工序需要上传的测试项名称和单位
                 GetFilteredTestItems(uploadEntity, out var currentTestNameList, out var currentUnitList);
 
-                // 请求构造计时：方法入口 → 发起HTTP之前（仅普通同步模式记录流程行）
-                Stopwatch buildWatch = Stopwatch.StartNew();
                 PrdSNCollection2 prdSNCollection = new PrdSNCollection2();
                 List<PrdSNsItem> prdSNsItems = new List<PrdSNsItem>();
 
@@ -3996,8 +4009,6 @@ namespace MesDatas.Views
 
                 for (int a = 0; a < scannedBarcodeList.Count; a++)
                 {
-                    UploadMes.AppendToComponent($"[{uploadEntity.Name}] 条码{a + 1}：{scannedBarcodeList[a]}");
-
                     TestDatas testDatas = new TestDatas { TestData = new List<TestDataItem>() };
                     Defects productDefects = new Defects { Defect = new List<Defect>() };
 
@@ -4121,16 +4132,9 @@ namespace MesDatas.Views
                 if (useOutboxRecord)
                     mesOutboxRecord = SaveOutboxPayload(mesOutboxRecord, inputParam);
 
-                // 第5行：请求构造完成（仅普通同步模式）
-                if (handleMesFailure) trace?.LogFlowElapsed("请求构造完成", buildWatch);
-
-                UploadMes.AppendToComponent($"[{uploadEntity.Name}] 请求MES流程开始");
-                // 第6行：发起过站请求（仅普通同步模式）
-                if (handleMesFailure) trace?.LogFlow("发起过站请求");
-                Stopwatch httpWatch = Stopwatch.StartNew();
+                httpWatch = Stopwatch.StartNew();
                 var returnParam = _request.GetResponseSerializeResult<ReturnParamSendResult, InputParamSendResult>(Url_DataUpload.Text, _httpClient, "SAVERESULT", inputParam, nameof(uploadEntity.Name));
                 httpWatch.Stop();
-                UploadMes.AppendToComponent($"[{uploadEntity.Name}] 请求MES流程结束");
 
                 if (returnParam == null)
                 {
@@ -4143,14 +4147,13 @@ namespace MesDatas.Views
                     UpdateWeightMesStatus(uploadEntity?.Name, scannedBarcodeList, MesOutboxStatus.PendingRetry, nullReason, "网络/接口");
                     if (uploadEntity.Name == ProcessName.Weight)
                         NotifyWeightPrintForbidden("Weight过站结果未知，禁止当前条码打印");
-                    // 第7行失败：收到响应为空（含响应头超时时附"可能已落库勿盲目重试"提示）
                     if (handleMesFailure)
-                        trace?.LogFlowFailure("收到过站响应", BuildMesFailReason("接口返回数据异常(Null)"));
+                        trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
                     else
                         trace?.Diag("MES_NULL_RETURN", "上传结果接口返回数据异常（null），后台模式只记录，不写PLC NG");
                     if (handleMesFailure)
                     {
-                        HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {BuildMesFailReason("上传结果接口返回数据异常（null）")}");
+                        HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {BuildMesFailReason("上传结果接口返回数据异常（null）")}", productPassTrace: trace);
                     }
                     return null;
                 }
@@ -4183,15 +4186,8 @@ namespace MesDatas.Views
                         NotifyWeightPrintForbidden($"Weight过站失败，禁止当前条码打印：{returnParam.ErrorMessage}");
                 }
 
-                // 第7行：收到过站响应（仅普通同步模式）——PASS取耗时，非PASS取失败原因
                 if (handleMesFailure)
-                {
-                    bool respPass = string.Equals(returnParam.Result, nameof(MyEnum.Result.PASS), StringComparison.OrdinalIgnoreCase);
-                    if (respPass)
-                        trace?.LogFlowElapsed("收到过站响应", httpWatch);
-                    else
-                        trace?.LogFlowFailure("收到过站响应", string.IsNullOrEmpty(returnParam.ErrorMessage) ? "MES返回未通过" : returnParam.ErrorMessage);
-                }
+                    trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
 
                 return returnParam;
             }
@@ -4207,12 +4203,12 @@ namespace MesDatas.Views
                 UpdateWeightMesStatus(uploadEntity?.Name, scannedBarcodeList, MesOutboxStatus.PendingRetry, ex.Message, "本地");
                 if (uploadEntity != null && uploadEntity.Name == ProcessName.Weight)
                     NotifyWeightPrintForbidden($"Weight过站异常，禁止当前条码打印：{ex.Message}");
-                if (handleMesFailure)
-                    trace?.LogFlowFailure("收到过站响应", $"数据上传流程发生异常：{ex.Message}");
+                if (handleMesFailure && httpWatch != null)
+                    trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
                 trace?.Diag("MES_REQUEST_EXCEPTION", "数据上传流程发生异常", ex);
                 if (handleMesFailure)
                 {
-                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] 数据上传流程发生异常：{ex}");
+                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] 数据上传流程发生异常：{ex}", productPassTrace: trace);
                 }
                 return null;
             }
@@ -4577,7 +4573,6 @@ namespace MesDatas.Views
 
             _clientScanAssy.OnTorqueDataReceived += (data) =>
             {
-                AppendLog(ProcessName.Scan_ASSY, BuildTorqueForwardReadyMessage(data));
                 Task.Run(async () => await ForwardTorqueToPlcAsync(ProcessName.Scan_ASSY, data));
             };
 
@@ -4610,7 +4605,6 @@ namespace MesDatas.Views
 
             _clientScrewBa.OnTorqueDataReceived += (data) =>
             {
-                AppendLog(ProcessName.Screw_BA, BuildTorqueForwardReadyMessage(data));
                 Task.Run(async () => await ForwardTorqueToPlcAsync(ProcessName.Screw_BA, data));
             };
 
@@ -4620,43 +4614,126 @@ namespace MesDatas.Views
         }
 
         /// <summary>
-        /// 每秒按电批连接状态写入PLC互锁信号：1=允许打螺钉，2=禁止。
-        /// <para>只根据当前连接状态写入，不读取比对、不判断是否已同步。</para>
+        /// 独立监控两个电批互锁地址，避免单个地址写入缓慢时阻塞另一个地址。
         /// </summary>
         private async Task TorqueInterlockMonitorLoopAsync(CancellationToken token)
         {
-            while (!token.IsCancellationRequested)
+            try
             {
-                await Task.Delay(1000, token);
-
-                if (!isPlcConnected) continue;
-
-                if (_clientScanAssy == null || _clientScrewBa == null) continue;
-
-                // ---------- 工序1 互锁：按连接状态每秒写入 ----------
-
-                short targetVal1 = _clientScanAssy.IsConnected ? (short)1 : (short)2;
-                await WriteInterlockAsync(addrInfo.TorqueReady1, targetVal1, "工序1电批互锁信号写入失败", token);
-
-                // ---------- 工序3 互锁：按连接状态每秒写入 ----------
-
-                short targetVal3 = _clientScrewBa.IsConnected ? (short)1 : (short)2;
-                await WriteInterlockAsync(addrInfo.TorqueReady3, targetVal3, "工序3电批互锁信号写入失败", token);
+                await Task.WhenAll(
+                    MonitorTorqueInterlockAsync(
+                        () => _clientScanAssy,
+                        addrInfo.TorqueReady1,
+                        "工序1",
+                        token),
+                    MonitorTorqueInterlockAsync(
+                        () => _clientScrewBa,
+                        addrInfo.TorqueReady3,
+                        "工序3",
+                        token));
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // 窗体关闭时正常结束互锁监控。
             }
         }
 
         /// <summary>
-        /// 写入互锁信号，带3秒超时；超时或失败时上报错误。
+        /// 按电批连接状态持续写入单个PLC互锁地址：1=允许打螺钉，2=禁止。
         /// </summary>
-        private async Task WriteInterlockAsync(string address, short value, string errorMessage, CancellationToken token)
+        private async Task MonitorTorqueInterlockAsync(
+            Func<TorqueControllerClient> clientProvider,
+            string address,
+            string processName,
+            CancellationToken token)
         {
-            var writeTask = _readWriteNet.WriteAsync(address, value);
-            var completedTask = await Task.WhenAny(writeTask, Task.Delay(3000, token));
+            Stopwatch continuousFailure = null;
+            bool alarmReported = false;
 
-            if (token.IsCancellationRequested) return;
+            while (!token.IsCancellationRequested)
+            {
+                TorqueControllerClient client = clientProvider();
+                if (!isPlcConnected || _readWriteNet == null || client == null)
+                {
+                    continuousFailure = null;
+                    alarmReported = false;
+                    await Task.Delay(TorqueInterlockWriteIntervalMs, token);
+                    continue;
+                }
 
-            if (completedTask != writeTask || !writeTask.Result.IsSuccess)
-                HandleError(address, value, true, errorMessage);
+                short targetValue = client.IsConnected ? (short)1 : (short)2;
+                Stopwatch writeDuration = Stopwatch.StartNew();
+                bool writeSucceeded = false;
+                string failureReason = string.Empty;
+
+                try
+                {
+                    OperateResult writeResult = await _readWriteNet.WriteAsync(address, targetValue);
+                    writeSucceeded = writeResult.IsSuccess;
+                    failureReason = writeResult.Message;
+                }
+                catch (Exception ex)
+                {
+                    failureReason = ex.Message;
+                }
+
+                if (token.IsCancellationRequested) break;
+
+                if (writeSucceeded)
+                {
+                    if (continuousFailure != null)
+                    {
+                        Log4netHelper.LogTorque(
+                            "TORQUE_INTERLOCK_WRITE_RECOVERED",
+                            $"{processName}电批互锁信号写入恢复",
+                            new Dictionary<string, object>
+                            {
+                                { "address", address },
+                                { "value", targetValue },
+                                { "failureDurationMs", continuousFailure.ElapsedMilliseconds }
+                            });
+                    }
+
+                    continuousFailure = null;
+                    alarmReported = false;
+
+                    int remainingDelay = TorqueInterlockWriteIntervalMs - (int)writeDuration.ElapsedMilliseconds;
+                    if (remainingDelay > 0)
+                        await Task.Delay(remainingDelay, token);
+                    continue;
+                }
+
+                if (continuousFailure == null)
+                {
+                    continuousFailure = Stopwatch.StartNew();
+                    Log4netHelper.LogTorque(
+                        "TORQUE_INTERLOCK_WRITE_FAILED",
+                        $"{processName}电批互锁信号首次写入失败",
+                        new Dictionary<string, object>
+                        {
+                            { "address", address },
+                            { "value", targetValue },
+                            { "reason", failureReason }
+                        },
+                        level: "WARN");
+                }
+
+                if (!alarmReported && continuousFailure.ElapsedMilliseconds >= TorqueInterlockAlarmThresholdMs)
+                {
+                    alarmReported = true;
+                    string alarmMessage = $"{processName}电批互锁信号连续10秒写入失败";
+                    HandleError(
+                        address,
+                        targetValue,
+                        true,
+                        alarmMessage,
+                        $"{alarmMessage}，最近一次失败原因：{failureReason}");
+                }
+
+                int retryDelay = TorqueInterlockRetryDelayMs - (int)writeDuration.ElapsedMilliseconds;
+                if (retryDelay > 0)
+                    await Task.Delay(retryDelay, token);
+            }
         }
 
         /// <summary>
@@ -4720,7 +4797,7 @@ namespace MesDatas.Views
                 }
 
                 SetTorqueAckWaitingState(context.ProcessName, true);
-                AppendLog(context.ProcessName, $"[转发请求] TransferId={transferId}，扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}，超时={ackTimeoutMs}ms");
+                AppendLog(context.ProcessName, $"[转发请求] 扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}");
 
                 var ackResult = await WaitForTorqueAckAsync(context, ackTimeoutMs);
                 if (!ackResult.IsAckReceived)
@@ -4729,10 +4806,10 @@ namespace MesDatas.Views
                     return;
                 }
 
-                AppendLog(context.ProcessName, $"PLC ACK已收到，TransferId={transferId}，Ack={context.AckAddress}当前值={ackResult.LastAckValue}，等待耗时={ackResult.ElapsedMs}ms");
+                AppendLog(context.ProcessName, $"PLC ACK已收到，{context.AckAddress}={ackResult.LastAckValue}，等待耗时={ackResult.ElapsedMs}ms");
 
                 await WaitForTorqueAckResetAsync(context, transferId);
-                AppendLog(context.ProcessName, $"[转发成功] TransferId={transferId}，扭力:{val}，结果:{resultText}，Req={context.RequestAddress}已复位0，Ack={context.AckAddress}已回0，恢复扭力转发");
+                AppendLog(context.ProcessName, $"[转发成功] {context.RequestAddress}已复位0，{context.AckAddress}已回0，恢复扭力转发");
             }
             catch (Exception ex)
             {
@@ -5054,32 +5131,19 @@ namespace MesDatas.Views
             });
         }
 
-        /// <summary>
-        /// 生成扭力数据进入窗体层后的诊断日志，证明程序已收到解析后的数据。
-        /// </summary>
-        private static string BuildTorqueForwardReadyMessage(TorqueData data)
-        {
-            if (data == null) return "程序已收到空扭力数据，准备转发PLC前已拦截";
-
-            string resultText = data.TighteningStatus ? "OK" : "NG";
-            return $"程序已收到扭力数据，准备转发PLC，Torque={data.Torque}，Min={data.TorqueMin}，Max={data.TorqueMax}，Result={resultText}，Time={data.TimeStamp}";
-        }
-
         // 辅助方法
         private void AppendLog(ProcessName processName, string msg)
         {
-            Log4netHelper.LogTorque("TORQUE_LOG", msg, new Dictionary<string, object>
-            {
-                { "process", processName }
-            });
+            string fullLine = $"{System.DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {msg}";
+            Log4netHelper.LogTorqueLine(processName, fullLine);
 
             switch (processName)
             {
                 case ProcessName.Scan_ASSY:
-                    rtbASSYLog.AppendToComponent($"[{processName}] {msg}");
+                    rtbASSYLog.AppendRaw(fullLine);
                     break;
                 case ProcessName.Screw_BA:
-                    rtbBALog.AppendToComponent($"[{processName}] {msg}");
+                    rtbBALog.AppendRaw(fullLine);
                     break;
                 default:
                     break;
@@ -6346,7 +6410,7 @@ namespace MesDatas.Views
         /// <param name="userMessage">显示在UI上的、面向操作员的错误消息。</param>
         /// <param name="logMessage">（可选）写入日志文件的更详细的技术性错误信息。如果为 null，将默认使用 userMessage 的内容。</param>
         /// <returns>始终返回 <b>false</b>，以便调用方中断当前操作</returns>
-        private bool HandleError(string feedbackAddress, short? feedBackValue = null, bool isBlockingError = false, string userMessage = null, string logMessage = null)
+        private bool HandleError(string feedbackAddress, short? feedBackValue = null, bool isBlockingError = false, string userMessage = null, string logMessage = null, RouteCheckTraceContext routeCheckTrace = null, ProductPassTraceContext productPassTrace = null)
         {
             var errorData = new ErrorEntity()
             {
@@ -6355,19 +6419,31 @@ namespace MesDatas.Views
                 IsBlockingError = isBlockingError,
                 UserMessage = userMessage ?? string.Empty,
                 LogMessage = logMessage ?? userMessage,
+                RouteCheckTrace = routeCheckTrace,
+                ProductPassTrace = productPassTrace,
                 timeStamp = System.DateTime.Now
             };
+
+            productPassTrace?.HandOffToError();
 
             bool shouldShow = false;
             lock (_errorLock)
             {
                 if (IsSameError(_currentActiveError, errorData) || ErrorQueue.Any(item => IsSameError(item, errorData)))
+                {
+                    routeCheckTrace?.CompleteWithoutFeedback(passed: false);
+                    productPassTrace?.CompleteWithoutFeedback(passed: false);
                     return false;
+                }
 
                 if (existErrorInErrorTip || _currentActiveError != null)
                 {
                     if (ErrorQueue.Count >= ErrorQueueMaxCount)
+                    {
+                        routeCheckTrace?.CompleteWithoutFeedback(passed: false);
+                        productPassTrace?.CompleteWithoutFeedback(passed: false);
                         return false;
+                    }
 
                     ErrorQueue.Enqueue(errorData);
                 }
@@ -6472,13 +6548,27 @@ namespace MesDatas.Views
                     var result = await _readWriteNet.WriteAsync(errorData.FeedBackAddress, Convert.ToInt16(errorData.FeedbackValue));
                     if (!result.IsSuccess)
                     {
+                        errorData.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
+                        errorData.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
                         Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_FAILED",
                             $"写入PLC地址 {errorData.FeedBackAddress} 失败：{result.Message}");
                     }
+                    else
+                    {
+                        errorData.RouteCheckTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue));
+                        errorData.ProductPassTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue));
+                    }
+                }
+                else
+                {
+                    errorData.RouteCheckTrace?.CompleteWithoutFeedback(passed: false);
+                    errorData.ProductPassTrace?.CompleteWithoutFeedback(passed: false);
                 }
             }
             catch (Exception ex)
             {
+                errorData.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
+                errorData.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
                 Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_EXCEPTION",
                     $"写入PLC地址 {errorData.FeedBackAddress} 异常：{ex}");
             }
@@ -6514,12 +6604,16 @@ namespace MesDatas.Views
                 {
                     if (!isPlcConnected)
                     {
+                        currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
+                        currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show("无法清除错误：PLC当前未连接，请先检查网络通讯！", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
 
                     if (_readWriteNet == null)
                     {
+                        currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
+                        currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show("无法清除错误：PLC通讯对象尚未初始化。", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -6528,9 +6622,19 @@ namespace MesDatas.Views
                     var result = await _readWriteNet.WriteAsync(feedbackAddress, feedbackValue);
                     if (!result.IsSuccess)
                     {
+                        currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
+                        currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show($"清除失败：写入PLC地址 {feedbackAddress} 失败。\r\n错误码: {result.ErrorCode}\r\n原因: {result.Message}", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
+
+                    currentError.RouteCheckTrace?.CompleteFeedback(passed: false, value: feedbackValue);
+                    currentError.ProductPassTrace?.CompleteFeedback(passed: false, value: feedbackValue);
+                }
+                else
+                {
+                    currentError.RouteCheckTrace?.CompleteWithoutFeedback(passed: false);
+                    currentError.ProductPassTrace?.CompleteWithoutFeedback(passed: false);
                 }
 
                 Log4netHelper.LogDataException("MANUAL_CLEAR_DONE", "手动清除报警完成", new Dictionary<string, object>
@@ -6544,6 +6648,8 @@ namespace MesDatas.Views
             }
             catch (Exception ex)
             {
+                currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(currentError.FeedbackValue), canRetry: true);
+                currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(currentError.FeedbackValue), canRetry: true);
                 Log4netHelper.LogDataException("MANUAL_CLEAR_EXCEPTION", "手动清除报警异常", new Dictionary<string, object>
                 {
                     { "feedback", currentError.FeedBackAddress },

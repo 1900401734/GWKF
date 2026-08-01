@@ -26,7 +26,7 @@
     <MapFileExtensions>true</MapFileExtensions>
     <UpdateUrl>http://localhost/bydMes/</UpdateUrl>
     <ApplicationRevision>2</ApplicationRevision>
-    <ApplicationVersion>1.0.0.%2a</ApplicationVersion>
+    <ApplicationVersion>1.1.0.%2a</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -323,6 +323,7 @@
     <Compile Include="DataAccess\TypeSugarClass.cs" />
     <Compile Include="Services\PLCAdress.cs" />
     <Compile Include="Services\MesOutboxStore.cs" />
+    <Compile Include="Services\WorkOrderHistoryStore.cs" />
     <Compile Include="Services\WeightMesStatusStore.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -335,6 +336,7 @@
     <Compile Include="Utility\HttpClientUtil.cs" />
     <Compile Include="Utility\Log4netUtil.cs" />
     <Compile Include="Utility\ProductPassTraceContext.cs" />
+    <Compile Include="Utility\RouteCheckTraceContext.cs" />
     <Compile Include="Utility\RequestMes.cs" />
     <Compile Include="Utility\WriteLog.cs" />
     <EmbeddedResource Include="Views\Form1.resx">
