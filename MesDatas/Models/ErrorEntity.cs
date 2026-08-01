@@ -21,6 +21,8 @@ namespace MesDatas.Models
 
         internal RouteCheckTraceContext RouteCheckTrace { get; set; }
 
+        internal ProductPassTraceContext ProductPassTrace { get; set; }
+
         public DateTime timeStamp;
     }
 }

@@ -2633,7 +2633,7 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint} = {triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
@@ -2646,8 +2646,7 @@ namespace MesDatas.Views
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        trace.LogFlowFailure("产品过站", ex.Message);
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
 
                         // 直接用新对象，防止值为null
                         scannedBarcodeList = new List<string>();
@@ -2707,7 +2706,7 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint} = {triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
@@ -2716,8 +2715,7 @@ namespace MesDatas.Views
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        trace.LogFlowFailure("产品过站", ex.Message);
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
                     }
                 }
             }
@@ -2773,7 +2771,7 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint} = {triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
@@ -2782,8 +2780,7 @@ namespace MesDatas.Views
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        trace.LogFlowFailure("产品过站", ex.Message);
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
                     }
                 }
             }
@@ -2839,7 +2836,7 @@ namespace MesDatas.Views
                 ProductPassTraceContext trace = ProductPassTraceContext.Start(uploadManager.Name, uploadManager.triggerPoint, uploadManager.feedbackPoint);
                 using (trace.EnterScope())
                 {
-                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint} = {triggerValue}");
+                    trace.LogFlow($"PLC触发产品过站，{uploadManager.triggerPoint}={triggerValue}");
 
                     try
                     {
@@ -2848,8 +2845,7 @@ namespace MesDatas.Views
                     catch (Exception ex)
                     {
                         trace.Diag("UPLOAD_LOOP_ERROR", "数据上传流程异常", ex);
-                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}");
-                        trace.LogFlowFailure("产品过站", ex.Message);
+                        HandleError(uploadManager.feedbackPoint, 2, true, $"生产结果读取异常:${ex.Message}", productPassTrace: trace);
                     }
                 }
             }
@@ -2877,7 +2873,7 @@ namespace MesDatas.Views
                     for (int i = 0; i < scannedBarcodeList.Count; i++)
                     {
                         productResultList.Add("3");
-                        UploadMes.AppendToComponent($"条码{i + 1}：{scannedBarcodeList[i]}");
+
                     }
                 }
                 else
@@ -2886,9 +2882,8 @@ namespace MesDatas.Views
                     if (!TryReadInt16Value(uploadEntity.ProductResult, out int ProductResult))
                     {
                         var log = $"[{uploadEntity.Name}] 产品结果读取失败({uploadEntity.ProductResult})，请检查PLC连接";
-                        trace?.LogFlowFailure("产品信息读取", $"产品结果读取失败({uploadEntity.ProductResult})，请检查PLC连接");
                         traceResult = "产品结果读取失败";
-                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log, productPassTrace: trace);
                         UploadMes.AppendToComponent(log);
                         return prdSN;
                     }
@@ -2898,9 +2893,8 @@ namespace MesDatas.Views
                     if (!TryReadStringValue(uploadEntity.BarcodeToUpload, uploadEntity.BarcodeToUploadLength, out prdSN))
                     {
                         var log = $"[{uploadEntity.Name}] 产品条码读取失败({uploadEntity.BarcodeToUpload})，请检查PLC连接";
-                        trace?.LogFlowFailure("产品信息读取", $"产品条码读取失败({uploadEntity.BarcodeToUpload})，请检查PLC连接");
                         traceResult = "产品条码读取失败";
-                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, userMessage: log, productPassTrace: trace);
                         UploadMes.AppendToComponent(log);
                         return prdSN;
                     }
@@ -2908,14 +2902,13 @@ namespace MesDatas.Views
                     if (string.IsNullOrWhiteSpace(prdSN))
                     {
                         var log = $"[{uploadEntity.Name}] 获取的条码数据为空";
-                        trace?.LogFlowFailure("产品信息读取", "获取的条码数据为空");
                         traceResult = "条码为空";
                         UploadMes.AppendToComponent(log);
-                        HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                         return prdSN;
                     }
 
-                    UploadMes.AppendToComponent($"[{uploadEntity.Name}] 读取到条码：{prdSN}");
+
                     scannedBarcodeList.Add(prdSN);
 
                     // 将读取到的结果写在界面上
@@ -2927,7 +2920,6 @@ namespace MesDatas.Views
 
                 if (scannedBarcodeList.Count == 0)
                 {
-                    trace?.LogFlowFailure("产品信息读取", "未获取到条码");
                     traceResult = "未获取到条码";
                     // 丢给外层捕捉
                     throw new Exception("未获取到条码");
@@ -2942,7 +2934,7 @@ namespace MesDatas.Views
 
                 #region ---------- 动态读取测试项数据 ----------
 
-                UploadMes.AppendToComponent($"[{uploadEntity.Name}] 准备读取测试数据");
+
 
                 var valList = new List<string>();
                 var maxList = new List<string>();
@@ -2954,16 +2946,15 @@ namespace MesDatas.Views
                 if (!TryReadDataByStation(uploadEntity, out dynamic failReason, ref valList, ref maxList, ref minList, ref resList, ref staList))
                 {
                     var log = $"[{uploadEntity.Name}] 读取测试数据异常: {failReason}";
-                    trace?.LogFlowFailure("测试数据读取", $"{failReason}");
                     traceResult = "读取测试数据失败";
-                    HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                    HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                     rtbErrorLog.AppendToComponent(log);
                     return prdSN;
                 }
 
                 trace?.LogFlowElapsed("测试数据读取完成", testDataWatch);
 
-                UploadMes.AppendToComponent($"[{uploadEntity.Name}] 测试数据读取完成");
+
 
                 #endregion
 
@@ -2976,7 +2967,10 @@ namespace MesDatas.Views
                 if (!EnableResultUpload.Checked)
                 {
                     bool feedbackOk = TryWriteInt16Value(uploadEntity.feedbackPoint, 1);
-                    trace?.LogFlowElapsedMs("产品过站成功", trace.TotalElapsedMs, $"，反馈{uploadEntity.feedbackPoint} = 1");
+                    if (feedbackOk)
+                        trace?.CompleteFeedback(passed: true, value: 1);
+                    else
+                        trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
                     Log4netHelper.LogMesInteraction("OFFLINE_BYPASS", "离线模式未上传MES，已按本地结果反馈PLC", new Dictionary<string, object>
                     {
                         { "process", uploadEntity.Name },
@@ -3009,20 +3003,19 @@ namespace MesDatas.Views
                     if (!feedbackOk)
                     {
                         string log = $"[{uploadEntity.Name}] 采集完成后反馈{uploadEntity.feedbackPoint}=1失败，请检查PLC连接";
-                        trace?.LogFlowFailure("数据采集完成", $"反馈{uploadEntity.feedbackPoint}=1失败，请检查PLC连接");
+                        trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
                         MarkOutboxPendingRetry(outboxRecord, "PLC_FEEDBACK_FAIL", log);
                         traceResult = "PLC反馈失败";
-                        HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                        HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                         UploadMes.AppendToComponent(log);
                         return prdSN;
                     }
-
-                    trace?.LogFlowElapsedMs("产品过站成功", trace.TotalElapsedMs, $"，反馈{uploadEntity.feedbackPoint} = 1");
+                    trace?.CompleteFeedback(passed: true, value: 1);
 
                     _ = StartMesUploadAfterFeedbackAsync(uploadSnapshot, trace, outboxRecord);
                     showResultNow = false;
                     traceResult = "PLC已反馈";
-                    UploadMes.AppendToComponent($"[{uploadEntity.Name}] 采集完成，已反馈{uploadEntity.feedbackPoint}=1，MES后台上传中");
+
                     lblRunningStatus.ExecuteSafely(c => { c.Text = "PLC已反馈，MES后台上传中"; c.ForeColor = Color.Green; });
                 }
                 else
@@ -3034,12 +3027,12 @@ namespace MesDatas.Views
 
                         // ============= 开始上传数据 =============
 
-                        UploadMes.AppendToComponent($"[{uploadEntity.Name}] 开始执行数据上传流程 <-");
+
 
                         // 上传结果到MES（含本地txt、图片等）；请求构造/发起请求/收到响应三行在 SendResultToMes 内记录
                         returnParam = SendResultToMes(scannedBarcodeList, productResultList, valList, maxList, minList, resList, staList, uploadEntity, trace);
 
-                        UploadMes.AppendToComponent($"[{uploadEntity.Name}] -> 数据上传流程执行结束");
+
 
                         // ============= 解析返回来的参数 =============
 
@@ -3054,16 +3047,15 @@ namespace MesDatas.Views
                             if (!feedbackResult.IsSuccess)
                             {
                                 var log = $"[{uploadEntity.Name}] MES已PASS，但反馈{uploadEntity.feedbackPoint}=1失败：{feedbackResult.Message}";
-                                trace?.LogFlowFailure("数据采集完成", $"反馈{uploadEntity.feedbackPoint}=1失败：{feedbackResult.Message}");
+                                trace?.LogFeedbackWriteFailed(passed: true, value: 1, canRetry: false);
                                 traceResult = "PLC反馈失败";
-                                HandleError(uploadEntity.feedbackPoint, 2, true, log);
+                                HandleError(uploadEntity.feedbackPoint, 2, true, log, productPassTrace: trace);
                                 UploadMes.AppendToComponent(log);
                                 return prdSN;
                             }
-
-                            trace?.LogFlowElapsedMs("产品过站成功", trace.TotalElapsedMs, $"，反馈{uploadEntity.feedbackPoint} = 1");
+                            trace?.CompleteFeedback(passed: true, value: 1);
                             traceResult = "PASS";
-                            UploadMes.AppendToComponent($"[{uploadEntity.Name}] 过站成功，反馈{uploadEntity.feedbackPoint} = 1");
+
                             lblRunningStatus.ExecuteSafely(c => { c.Text = "生产结果上传成功"; c.ForeColor = Color.Green; });
                         }
                         else
@@ -3115,18 +3107,17 @@ namespace MesDatas.Views
                             // 根据界面上的设置决定NG显示和阻塞逻辑
                             string operJudge = cboProductMode.GetPropertySafely(c => c.Text);
                             traceResult = "FAIL";
-                            trace?.LogFlowElapsedMs("产品过站失败", trace.TotalElapsedMs, $"，反馈{uploadEntity.feedbackPoint} = 2");
                             trace?.Diag("MES_FAIL", $"MES返回FAIL，程序模式={operJudge}，准备反馈{uploadEntity.feedbackPoint}=2");
                             switch (operJudge)
                             {
                                 case "不显示NG且阻塞":
-                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}");
+                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}", productPassTrace: trace);
                                     return prdSN;
                                 case "显示NG且阻塞":
-                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}");
+                                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}", productPassTrace: trace);
                                     break;
                                 case "显示NG且不阻塞":
-                                    HandleError(uploadEntity.feedbackPoint, 2, false, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}");
+                                    HandleError(uploadEntity.feedbackPoint, 2, false, $"[{uploadEntity.Name}] {returnParam.ErrorMessage}", productPassTrace: trace);
                                     break;
                             }
                         }
@@ -4015,8 +4006,6 @@ namespace MesDatas.Views
 
                 for (int a = 0; a < scannedBarcodeList.Count; a++)
                 {
-                    UploadMes.AppendToComponent($"[{uploadEntity.Name}] 条码{a + 1}：{scannedBarcodeList[a]}");
-
                     TestDatas testDatas = new TestDatas { TestData = new List<TestDataItem>() };
                     Defects productDefects = new Defects { Defect = new List<Defect>() };
 
@@ -4156,12 +4145,12 @@ namespace MesDatas.Views
                     if (uploadEntity.Name == ProcessName.Weight)
                         NotifyWeightPrintForbidden("Weight过站结果未知，禁止当前条码打印");
                     if (handleMesFailure)
-                        trace?.LogFlowElapsedFailure("MES请求-响应完成", httpWatch, BuildMesFailReason("接口返回数据异常(Null)"));
+                        trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
                     else
                         trace?.Diag("MES_NULL_RETURN", "上传结果接口返回数据异常（null），后台模式只记录，不写PLC NG");
                     if (handleMesFailure)
                     {
-                        HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {BuildMesFailReason("上传结果接口返回数据异常（null）")}");
+                        HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] {BuildMesFailReason("上传结果接口返回数据异常（null）")}", productPassTrace: trace);
                     }
                     return null;
                 }
@@ -4195,13 +4184,7 @@ namespace MesDatas.Views
                 }
 
                 if (handleMesFailure)
-                {
-                    bool respPass = string.Equals(returnParam.Result, nameof(MyEnum.Result.PASS), StringComparison.OrdinalIgnoreCase);
-                    if (respPass)
-                        trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
-                    else
-                        trace?.LogFlowElapsedFailure("MES请求-响应完成", httpWatch, string.IsNullOrEmpty(returnParam.ErrorMessage) ? "MES返回未通过" : returnParam.ErrorMessage);
-                }
+                    trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
 
                 return returnParam;
             }
@@ -4217,17 +4200,12 @@ namespace MesDatas.Views
                 UpdateWeightMesStatus(uploadEntity?.Name, scannedBarcodeList, MesOutboxStatus.PendingRetry, ex.Message, "本地");
                 if (uploadEntity != null && uploadEntity.Name == ProcessName.Weight)
                     NotifyWeightPrintForbidden($"Weight过站异常，禁止当前条码打印：{ex.Message}");
-                if (handleMesFailure)
-                {
-                    if (httpWatch == null)
-                        trace?.LogFlowFailure("MES请求-响应完成", $"数据上传流程发生异常：{ex.Message}");
-                    else
-                        trace?.LogFlowElapsedFailure("MES请求-响应完成", httpWatch, $"数据上传流程发生异常：{ex.Message}");
-                }
+                if (handleMesFailure && httpWatch != null)
+                    trace?.LogFlowElapsed("MES请求-响应完成", httpWatch);
                 trace?.Diag("MES_REQUEST_EXCEPTION", "数据上传流程发生异常", ex);
                 if (handleMesFailure)
                 {
-                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] 数据上传流程发生异常：{ex}");
+                    HandleError(uploadEntity.feedbackPoint, 2, true, $"[{uploadEntity.Name}] 数据上传流程发生异常：{ex}", productPassTrace: trace);
                 }
                 return null;
             }
@@ -6361,7 +6339,7 @@ namespace MesDatas.Views
         /// <param name="userMessage">显示在UI上的、面向操作员的错误消息。</param>
         /// <param name="logMessage">（可选）写入日志文件的更详细的技术性错误信息。如果为 null，将默认使用 userMessage 的内容。</param>
         /// <returns>始终返回 <b>false</b>，以便调用方中断当前操作</returns>
-        private bool HandleError(string feedbackAddress, short? feedBackValue = null, bool isBlockingError = false, string userMessage = null, string logMessage = null, RouteCheckTraceContext routeCheckTrace = null)
+        private bool HandleError(string feedbackAddress, short? feedBackValue = null, bool isBlockingError = false, string userMessage = null, string logMessage = null, RouteCheckTraceContext routeCheckTrace = null, ProductPassTraceContext productPassTrace = null)
         {
             var errorData = new ErrorEntity()
             {
@@ -6371,8 +6349,11 @@ namespace MesDatas.Views
                 UserMessage = userMessage ?? string.Empty,
                 LogMessage = logMessage ?? userMessage,
                 RouteCheckTrace = routeCheckTrace,
+                ProductPassTrace = productPassTrace,
                 timeStamp = System.DateTime.Now
             };
+
+            productPassTrace?.HandOffToError();
 
             bool shouldShow = false;
             lock (_errorLock)
@@ -6380,6 +6361,7 @@ namespace MesDatas.Views
                 if (IsSameError(_currentActiveError, errorData) || ErrorQueue.Any(item => IsSameError(item, errorData)))
                 {
                     routeCheckTrace?.CompleteWithoutFeedback(passed: false);
+                    productPassTrace?.CompleteWithoutFeedback(passed: false);
                     return false;
                 }
 
@@ -6388,6 +6370,7 @@ namespace MesDatas.Views
                     if (ErrorQueue.Count >= ErrorQueueMaxCount)
                     {
                         routeCheckTrace?.CompleteWithoutFeedback(passed: false);
+                        productPassTrace?.CompleteWithoutFeedback(passed: false);
                         return false;
                     }
 
@@ -6495,22 +6478,26 @@ namespace MesDatas.Views
                     if (!result.IsSuccess)
                     {
                         errorData.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
+                        errorData.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
                         Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_FAILED",
                             $"写入PLC地址 {errorData.FeedBackAddress} 失败：{result.Message}");
                     }
                     else
                     {
                         errorData.RouteCheckTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue));
+                        errorData.ProductPassTrace?.CompleteFeedback(passed: false, value: Convert.ToInt16(errorData.FeedbackValue));
                     }
                 }
                 else
                 {
                     errorData.RouteCheckTrace?.CompleteWithoutFeedback(passed: false);
+                    errorData.ProductPassTrace?.CompleteWithoutFeedback(passed: false);
                 }
             }
             catch (Exception ex)
             {
                 errorData.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
+                errorData.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(errorData.FeedbackValue), canRetry: false);
                 Log4netHelper.LogDataException("NON_BLOCKING_FEEDBACK_EXCEPTION",
                     $"写入PLC地址 {errorData.FeedBackAddress} 异常：{ex}");
             }
@@ -6547,6 +6534,7 @@ namespace MesDatas.Views
                     if (!isPlcConnected)
                     {
                         currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
+                        currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show("无法清除错误：PLC当前未连接，请先检查网络通讯！", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -6554,6 +6542,7 @@ namespace MesDatas.Views
                     if (_readWriteNet == null)
                     {
                         currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
+                        currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show("无法清除错误：PLC通讯对象尚未初始化。", "通讯异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -6563,15 +6552,18 @@ namespace MesDatas.Views
                     if (!result.IsSuccess)
                     {
                         currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
+                        currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: feedbackValue, canRetry: true);
                         MessageBox.Show($"清除失败：写入PLC地址 {feedbackAddress} 失败。\r\n错误码: {result.ErrorCode}\r\n原因: {result.Message}", "复位失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
 
                     currentError.RouteCheckTrace?.CompleteFeedback(passed: false, value: feedbackValue);
+                    currentError.ProductPassTrace?.CompleteFeedback(passed: false, value: feedbackValue);
                 }
                 else
                 {
                     currentError.RouteCheckTrace?.CompleteWithoutFeedback(passed: false);
+                    currentError.ProductPassTrace?.CompleteWithoutFeedback(passed: false);
                 }
 
                 Log4netHelper.LogDataException("MANUAL_CLEAR_DONE", "手动清除报警完成", new Dictionary<string, object>
@@ -6586,6 +6578,7 @@ namespace MesDatas.Views
             catch (Exception ex)
             {
                 currentError.RouteCheckTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(currentError.FeedbackValue), canRetry: true);
+                currentError.ProductPassTrace?.LogFeedbackWriteFailed(passed: false, value: Convert.ToInt16(currentError.FeedbackValue), canRetry: true);
                 Log4netHelper.LogDataException("MANUAL_CLEAR_EXCEPTION", "手动清除报警异常", new Dictionary<string, object>
                 {
                     { "feedback", currentError.FeedBackAddress },
