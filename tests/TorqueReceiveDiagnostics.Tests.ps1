@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 )
 
@@ -75,25 +75,27 @@ foreach ($path in @($clientPath, $formPath)) {
 $client = [System.IO.File]::ReadAllText($clientPath)
 $form = [System.IO.File]::ReadAllText($formPath)
 
-$rawTorquePacketText = New-Text @(0x6536,0x5230,0x626D,0x529B,0x539F,0x59CB,0x62A5,0x6587)
-$parseSuccessText = New-Text @(0x626D,0x529B,0x62A5,0x6587,0x89E3,0x6790,0x6210,0x529F)
-$noTorqueSummaryText = New-Text @(0x5DF2,0x8FDE,0x63A5,0x4F46,0x672A,0x6536,0x5230,0x0020,0x004D,0x0049,0x0044,0x0020,0x0030,0x0030,0x0036,0x0031)
-$shortPacketText = New-Text @(0x6536,0x5230,0x77ED,0x62A5,0x6587)
-$unknownMidText = New-Text @(0x6536,0x5230,0x672A,0x5904,0x7406,0x0020,0x004D,0x0049,0x0044)
-$forwardPlcText = New-Text @(0x7A0B,0x5E8F,0x5DF2,0x6536,0x5230,0x626D,0x529B,0x6570,0x636E,0xFF0C,0x51C6,0x5907,0x8F6C,0x53D1,0x0050,0x004C,0x0043)
-$heartbeatText = New-Text @(0x6536,0x5230,0x5FC3,0x8DF3)
+$rawTorquePacketText = '收到扭力原始报文'
+$parseSuccessText = '扭力报文解析成功'
+$noTorqueSummaryText = '已连接但未收到 MID 0061 扭力数据'
+$shortPacketText = '收到短报文'
+$unknownMidText = '收到未处理 MID'
+$heartbeatText = '收到心跳'
 
-Assert-Contains $client 'TorqueNoDataSummaryIntervalSeconds = 30' 'Torque diagnostics must use a 30 second no-data summary interval.'
-Assert-Contains $client '_lastTorqueDataReceiveTime' 'Torque diagnostics must track the last MID 0061 receive time.'
-Assert-Contains $client '_lastNoTorqueDataSummaryTime' 'Torque diagnostics must throttle no-data summaries.'
-Assert-Contains $client 'ReportNoTorqueDataIfNeeded' 'Torque diagnostics must report connected-but-no-torque-data summaries.'
-Assert-Contains $client 'BuildPacketSummary' 'Torque diagnostics must log a bounded raw packet summary.'
+Assert-NotContains $client 'TorqueNoDataSummaryIntervalSeconds' 'Torque diagnostics must not schedule idle no-data summaries.'
+Assert-NotContains $client '_lastTorqueDataReceiveTime' 'Torque diagnostics must not track idle time since the last MID 0061.'
+Assert-NotContains $client '_lastNoTorqueDataSummaryTime' 'Torque diagnostics must not retain idle-summary throttle state.'
+Assert-NotContains $client 'ReportNoTorqueDataIfNeeded' 'Connected idle time must not generate recurring torque logs.'
+Assert-NotContains $client $noTorqueSummaryText 'Connected idle time must not write no-MID-0061 log lines.'
+Assert-Contains $client 'BuildPacketSummary' 'Torque diagnostics must retain bounded packet summaries for abnormal packets.'
 
-Assert-Contains $client $shortPacketText 'Torque diagnostics must log short packets.'
-Assert-Contains $client $unknownMidText 'Torque diagnostics must log unknown MID packets.'
-Assert-Contains $client $rawTorquePacketText 'Torque diagnostics must log raw MID 0061 torque packets.'
-Assert-Contains $client $parseSuccessText 'Torque diagnostics must log successful torque packet parsing.'
-Assert-Contains $client $noTorqueSummaryText 'Torque diagnostics must log connected-but-no-MID-0061 summaries.'
+Assert-Contains $client $shortPacketText 'Torque diagnostics must retain short-packet diagnostics.'
+Assert-Contains $client $unknownMidText 'Torque diagnostics must retain unknown-MID diagnostics.'
+Assert-Contains $client 'OnLog?.Invoke("收到扭力原始报文", false);' 'MID 0061 must use the concise raw-packet log line.'
+Assert-Contains $client '扭力报文解析成功，扭力={data.Torque}，下限={data.TorqueMin}，上限={data.TorqueMax}，结果=' 'Parsed torque logs must use the requested Chinese field names.'
+Assert-NotContains $client '收到扭力原始报文 MID 0061' 'Normal MID 0061 logs must not include protocol metadata.'
+Assert-NotContains $client 'Torque={data.Torque}' 'Normal parsed logs must not use legacy English field names.'
+Assert-NotContains $client 'Time={data.TimeStamp}' 'Normal parsed logs must not include the controller timestamp.'
 
 Assert-TextAppearsBefore `
     $client `
@@ -112,14 +114,14 @@ Assert-NotContains $client ('OnLog?.Invoke($"' + $heartbeatText) 'Heartbeat MID 
 
 Assert-RegexMatch `
     $form `
-    'OnTorqueDataReceived\s*\+=\s*\(data\)\s*=>[\s\S]*?AppendLog\(ProcessName\.Scan_ASSY,[\s\S]*?Task\.Run\(async\s*\(\)\s*=>\s*await ForwardTorqueToPlcAsync\(ProcessName\.Scan_ASSY,\s*data\)\)' `
-    'Scan_ASSY must log received torque data before forwarding to PLC.'
+    'OnTorqueDataReceived\s*\+=\s*\(data\)\s*=>[\s\S]*?Task\.Run\(async\s*\(\)\s*=>\s*await ForwardTorqueToPlcAsync\(ProcessName\.Scan_ASSY,\s*data\)\)' `
+    'Scan_ASSY must forward parsed torque data directly to PLC.'
 
 Assert-RegexMatch `
     $form `
-    'OnTorqueDataReceived\s*\+=\s*\(data\)\s*=>[\s\S]*?AppendLog\(ProcessName\.Screw_BA,[\s\S]*?Task\.Run\(async\s*\(\)\s*=>\s*await ForwardTorqueToPlcAsync\(ProcessName\.Screw_BA,\s*data\)\)' `
-    'Screw_BA must log received torque data before forwarding to PLC.'
+    'OnTorqueDataReceived\s*\+=\s*\(data\)\s*=>[\s\S]*?Task\.Run\(async\s*\(\)\s*=>\s*await ForwardTorqueToPlcAsync\(ProcessName\.Screw_BA,\s*data\)\)' `
+    'Screw_BA must forward parsed torque data directly to PLC.'
 
-Assert-Contains $form $forwardPlcText 'Form1 must log that parsed torque data is ready to forward to PLC.'
-
+Assert-NotContains $form 'BuildTorqueForwardReadyMessage' 'Form1 must not emit the duplicate ready-to-forward log node.'
+Assert-NotContains $form '程序已收到扭力数据，准备转发PLC' 'The normal torque flow must not contain the legacy duplicate forwarding line.'
 Write-Host 'TorqueReceiveDiagnostics source checks passed.'

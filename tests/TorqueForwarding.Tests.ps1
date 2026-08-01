@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 )
 
@@ -77,6 +77,12 @@ Assert-Contains $form 'Req=' 'Timeout logs must include the request address.'
 Assert-Contains $form $clearReqText 'Timeout logs must state that Req is cleared after ACK timeout.'
 Assert-Contains $form $ignoreTransferText 'Timeout logs must state that the timed-out transfer is ignored.'
 Assert-Contains $form $ackRecoveredText 'Recovery logs must state that PLC ACK was received.'
+Assert-Contains $form 'AppendLog(context.ProcessName, $"[转发请求] 扭力={val}，结果={resultText}，Req={context.RequestAddress}=1，等待Ack={context.AckAddress}");' 'Normal forwarding requests must use the concise configured-address format.'
+Assert-Contains $form 'AppendLog(context.ProcessName, $"PLC ACK已收到，{context.AckAddress}={ackResult.LastAckValue}，等待耗时={ackResult.ElapsedMs}ms");' 'Normal ACK logs must use the concise configured-address format.'
+Assert-Contains $form 'AppendLog(context.ProcessName, $"[转发成功] {context.RequestAddress}已复位0，{context.AckAddress}已回0，恢复扭力转发");' 'Normal forwarding completion logs must use the concise reset format.'
+Assert-NotContains $form '[转发请求] TransferId=' 'Normal forwarding requests must not include TransferId.'
+Assert-NotContains $form 'PLC ACK已收到，TransferId=' 'Normal ACK logs must not include TransferId.'
+Assert-NotContains $form '[转发成功] TransferId=' 'Normal forwarding completion logs must not include TransferId.'
 
 Assert-NotContains $form 'while (!isSuccess)' 'Torque forwarding must not use an infinite retry loop.'
 Assert-NotContains $form $keepReqHighText 'Torque timeout must not keep Req high after the configured timeout.'
