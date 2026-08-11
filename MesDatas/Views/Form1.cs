@@ -307,8 +307,15 @@ namespace MesDatas.Views
                     PlcSignalLight.ForeColor = isPlcConnected ? Color.Green : Color.Red;
                 }));
             };
-            // PLC业务心跳只用于连接管理器内部健康判断。
-            // 现场确认不需要把心跳异常/恢复刷到异常详情，避免D7107波动干扰操作员判断。
+            // PLC业务心跳异常/恢复提示到异常详情，便于现场确认心跳停止时间点。
+            _plcManager.OnHeartbeatStatusChanged += (isAlive, msg) =>
+            {
+                rtbErrorLog.AppendToComponent(msg);
+                Log4netHelper.LogDataException("PLC_HEARTBEAT_CHANGED", msg, new Dictionary<string, object>
+                {
+                    { "alive", isAlive }
+                });
+            };
 
             userInfoDataGridObject = new DataGridViewData(dgvUserInfo, "userinfo", sourceDb);
             errorPreserveDataGridObject = new DataGridViewData(dgvErrorPreserve, "ErrorReferenceTable", curDb);
@@ -771,7 +778,8 @@ namespace MesDatas.Views
                     SetDynamicTaskStart();
 
                     // 自动保存
-                    if (PlcInputAutoSave.Checked) SYS_Model_Write(false);
+                    //if (PlcInputAutoSave.Checked) SYS_Model_Write(false);
+                    SYS_Model_Write(false);
                 }
 
                 MessageBox.Show(status ? "连接成功" : "连接失败，请检查输入，或PLC设备在线状态");
@@ -5869,7 +5877,7 @@ namespace MesDatas.Views
         /// </summary>
         private void SYS_Model_Write(bool alterSuccessTip)
         {
-            if (PlcIP.Text == String.Empty || PlcPort.Text == String.Empty || DeviceName.Text == String.Empty || RealtimeArgsUploadRate.Text == String.Empty)
+            if (PlcIP.Text == String.Empty || PlcPort.Text == String.Empty || DeviceName.Text == String.Empty/* || RealtimeArgsUploadRate.Text == String.Empty*/)
             {
                 MessageBox.Show("当前界面内容均为必填项、请先填写完善");
                 return;

@@ -543,6 +543,7 @@ namespace MesDatas.Views
             this.label141 = new System.Windows.Forms.Label();
             this.label137 = new System.Windows.Forms.Label();
             this.label11 = new System.Windows.Forms.Label();
+            this.label142 = new System.Windows.Forms.Label();
             this.tabPage9.SuspendLayout();
             this.tableLayoutPanel13.SuspendLayout();
             this.groupBox23.SuspendLayout();
@@ -1723,7 +1724,7 @@ namespace MesDatas.Views
             // 
             // BarcodeRule
             // 
-            this.BarcodeRule.Location = new System.Drawing.Point(256, 224);
+            this.BarcodeRule.Location = new System.Drawing.Point(256, 214);
             this.BarcodeRule.Margin = new System.Windows.Forms.Padding(2);
             this.BarcodeRule.Name = "BarcodeRule";
             this.BarcodeRule.Size = new System.Drawing.Size(166, 30);
@@ -1786,7 +1787,7 @@ namespace MesDatas.Views
             // 
             this.EnableReportConfigParam.AutoSize = true;
             this.EnableReportConfigParam.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.EnableReportConfigParam.Location = new System.Drawing.Point(438, 227);
+            this.EnableReportConfigParam.Location = new System.Drawing.Point(438, 217);
             this.EnableReportConfigParam.Margin = new System.Windows.Forms.Padding(2);
             this.EnableReportConfigParam.Name = "EnableReportConfigParam";
             this.EnableReportConfigParam.Size = new System.Drawing.Size(212, 28);
@@ -1863,7 +1864,7 @@ namespace MesDatas.Views
             // 
             this.label22.AutoSize = true;
             this.label22.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.label22.Location = new System.Drawing.Point(155, 227);
+            this.label22.Location = new System.Drawing.Point(155, 217);
             this.label22.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.label22.Name = "label22";
             this.label22.Size = new System.Drawing.Size(100, 24);
@@ -5123,7 +5124,6 @@ namespace MesDatas.Views
             this.cmbType.Name = "cmbType";
             this.cmbType.Size = new System.Drawing.Size(180, 31);
             this.cmbType.TabIndex = 73;
-            this.cmbType.SelectedIndex = 0;
             this.cmbType.SelectedIndexChanged += new System.EventHandler(this.cmbType_SelectedIndexChanged);
             // 
             // lblType
@@ -5266,6 +5266,7 @@ namespace MesDatas.Views
             // groupBox5
             // 
             this.groupBox5.Controls.Add(this.PlcInputAutoSave);
+            this.groupBox5.Controls.Add(this.label142);
             this.groupBox5.Controls.Add(this.PlcConnectType);
             this.groupBox5.Controls.Add(this.label24);
             this.groupBox5.Controls.Add(this.btnStartTask);
@@ -5289,13 +5290,14 @@ namespace MesDatas.Views
             // 
             this.PlcInputAutoSave.AutoSize = true;
             this.PlcInputAutoSave.ImeMode = System.Windows.Forms.ImeMode.NoControl;
-            this.PlcInputAutoSave.Location = new System.Drawing.Point(352, 28);
+            this.PlcInputAutoSave.Location = new System.Drawing.Point(599, 28);
             this.PlcInputAutoSave.Margin = new System.Windows.Forms.Padding(2);
             this.PlcInputAutoSave.Name = "PlcInputAutoSave";
             this.PlcInputAutoSave.Size = new System.Drawing.Size(104, 28);
             this.PlcInputAutoSave.TabIndex = 65;
             this.PlcInputAutoSave.Text = "自动保存";
             this.PlcInputAutoSave.UseVisualStyleBackColor = true;
+            this.PlcInputAutoSave.Visible = false;
             // 
             // PlcConnectType
             // 
@@ -7143,6 +7145,16 @@ namespace MesDatas.Views
             this.label11.TabIndex = 6;
             this.label11.Text = "上传结果：";
             // 
+            // label142
+            // 
+            this.label142.AutoSize = true;
+            this.label142.ForeColor = System.Drawing.Color.IndianRed;
+            this.label142.Location = new System.Drawing.Point(368, 30);
+            this.label142.Name = "label142";
+            this.label142.Size = new System.Drawing.Size(226, 24);
+            this.label142.TabIndex = 65;
+            this.label142.Text = "提示：连接成功会自动保存";
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(120F, 120F);
@@ -7849,6 +7861,7 @@ namespace MesDatas.Views
         private Label lblPoint;
         private ComboBox cmbType;
         private Label lblType;
+        private Label label142;
     }
 }
 
