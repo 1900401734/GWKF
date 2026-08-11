@@ -16,7 +16,8 @@ namespace MesDatas.Services
     public class PlcConnectionManager
     {
         private const int MonitorIntervalMs = 500;           // PLC连接管理循环间隔，单位：毫秒
-        private const int PlcHeartbeatTimeoutMs = 10000;     // PLC心跳超过该时间未变化后判定为异常
+        private const int PlcHeartbeatTimeoutMs = 15000;     // PLC心跳超过该时间未变化后提示异常详情
+        private const int PlcHeartbeatBreakMs = 60000;       // PLC心跳持续该时间未变化后切断连接并重连
         private const int HeartbeatReadTimeoutMs = 1000;     // 单次读取PLC心跳的等待时间
 
         private dynamic _plcConnectObject;
@@ -39,8 +40,9 @@ namespace MesDatas.Services
         /// <summary>
         /// 启动连接和心跳管理的后台任务
         /// <para>1. 如果未连接，循环尝试连接。</para>
-        /// <para>2. 如果已连接，只读取PLC心跳业务信号。</para>
-        /// <para>3. PLC心跳超过10秒未变化时，只触发心跳告警，不切断PLC通讯状态。</para>
+        /// <para>2. 如果已连接，持续读取PLC心跳业务信号。</para>
+        /// <para>3. PLC心跳超过15秒未变化时，在异常详情提示。</para>
+        /// <para>4. PLC心跳超过60秒未变化时，切断连接并进入重连流程。</para>
         /// </summary>
         public async Task StartConnectionTaskAsync(string ip, int port, string connectType, CancellationToken token)
         {
@@ -97,12 +99,21 @@ namespace MesDatas.Services
                         consecutiveReadFailCount++;
                     }
 
-                    // 心跳超时只代表业务心跳异常，不再直接切断PLC通讯连接状态。
+                    // 心跳超时15秒只提示异常详情；持续到60秒仍未变化则切断连接，由下一轮循环重连。
                     if (IsPlcHeartbeatTimeout(lastHeartbeatChangeTime) && isHeartbeatAlive)
                     {
                         var timeoutMessage = BuildHeartbeatStatusMessage(false, lastHeartbeatValue, lastHeartbeatChangeTime, consecutiveReadFailCount);
                         UpdateHeartbeatStatus(false, timeoutMessage);
                         isHeartbeatAlive = false;
+                    }
+
+                    if (IsPlcHeartbeatBreakTimeout(lastHeartbeatChangeTime))
+                    {
+                        var breakMessage = BuildHeartbeatBreakMessage(lastHeartbeatValue, lastHeartbeatChangeTime, consecutiveReadFailCount);
+                        UpdateConnectionStatus(false, breakMessage);
+                        ResetHeartbeatWatchdog(ref lastHeartbeatValue, ref lastHeartbeatChangeTime);
+                        consecutiveReadFailCount = 0;
+                        isHeartbeatAlive = true;
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -168,6 +179,14 @@ namespace MesDatas.Services
                 {
                     ReadWriteNet = networkDeviceBase;
                     _plcConnectObject = networkDeviceBase;
+
+                    // MC等无握手协议下TCP连通不代表PLC可用，用一次实际读取确认
+                    if (!(await TryReadPlcHeartbeatAsync()).HasValue)
+                    {
+                        UpdateConnectionStatus(false, "[PLC连接管理器] TCP已连通但读取PLC失败，判定为不可用");
+                        return false;
+                    }
+
                     UpdateConnectionStatus(true);
                     return true;
                 }
@@ -240,6 +259,26 @@ namespace MesDatas.Services
         private static bool IsPlcHeartbeatTimeout(DateTime lastHeartbeatChangeTime)
         {
             return (DateTime.UtcNow - lastHeartbeatChangeTime).TotalMilliseconds >= PlcHeartbeatTimeoutMs;
+        }
+
+        /// <summary>
+        /// 判断PLC心跳未变化时长是否已达到切断连接的阈值。
+        /// </summary>
+        private static bool IsPlcHeartbeatBreakTimeout(DateTime lastHeartbeatChangeTime)
+        {
+            return (DateTime.UtcNow - lastHeartbeatChangeTime).TotalMilliseconds >= PlcHeartbeatBreakMs;
+        }
+
+        /// <summary>
+        /// 构建心跳超时切断连接的日志，便于现场确认地址、最近值和失败次数。
+        /// </summary>
+        private string BuildHeartbeatBreakMessage(short? lastHeartbeatValue, DateTime lastHeartbeatChangeTime, int consecutiveReadFailCount)
+        {
+            var lastValueText = lastHeartbeatValue.HasValue ? lastHeartbeatValue.Value.ToString() : "无";
+            var unchangedSeconds = (int)(DateTime.UtcNow - lastHeartbeatChangeTime).TotalSeconds;
+
+            return $"[PLC连接管理器] PLC心跳超过{PlcHeartbeatBreakMs / 1000}秒未变化，已切断连接并准备重连，" +
+                   $"地址: {_addressInfo.PlcHeartBeat}，最近值: {lastValueText}，未变化时长: {unchangedSeconds}s，连续读取失败: {consecutiveReadFailCount}次";
         }
 
         /// <summary>
