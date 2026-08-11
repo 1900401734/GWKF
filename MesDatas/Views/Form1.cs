@@ -2192,8 +2192,8 @@ namespace MesDatas.Views
 
                 if (barcodeType == 2)
                 {
-                    rtbReadBarCode.AppendToComponent($"读取条码{scannedBarcode}");
-                    Log4netHelper.LogRouteCheck("BARCODE_READ", "读取到PLC条码", new Dictionary<string, object>
+                    rtbReadBarCode.AppendToComponent($"读取工装条码{scannedBarcode}");
+                    Log4netHelper.LogRouteCheck("BARCODE_READ", "读取到工装条码", new Dictionary<string, object>
                     {
                         { "address", addrInfo.PlcScannedBarcode },
                         { "barcode", scannedBarcode }
@@ -2201,7 +2201,7 @@ namespace MesDatas.Views
                 }
                 else
                 {
-                    routeCheckTrace?.LogFlow($"条码读取成功，条码={scannedBarcode}");
+                    routeCheckTrace?.LogFlow($"产品条码读取成功，条码={scannedBarcode}");
                 }
 
                 // --- 3. 业务分支：工装条码 (Type 2) ---
