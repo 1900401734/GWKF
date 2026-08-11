@@ -49,12 +49,7 @@ namespace MesDatas.Views
             int orderQuantity;
             int.TryParse(OrderNum.Text, out orderQuantity);
 
-            if (string.IsNullOrWhiteSpace(orderNo))
-            {
-                MessageBox.Show("工单号不能为空！");
-                return;
-            }
-
+            // 允许工单号为空进行生产，操作员仍必填。
             if (string.IsNullOrWhiteSpace(oper))
             {
                 MessageBox.Show("操作员不能为空！");

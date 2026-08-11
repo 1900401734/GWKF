@@ -23,10 +23,11 @@ namespace MesDatas.Services
 
         public Form3Entity GetLatestOrder()
         {
+            // 不过滤空工单号，保证重启后仍能延续上次的空工单生产状态。
             DataTable rows = _database.Find("SELECT * FROM ChangeOrder ORDER BY id DESC");
             return rows.Rows.Cast<DataRow>()
                 .Select(ToEntity)
-                .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.GDH));
+                .FirstOrDefault();
         }
 
         public List<Form3Entity> GetRecentOrders(string operatorId, string orderNoPrefix = null)
@@ -35,8 +36,7 @@ namespace MesDatas.Services
 
             string sql = $"SELECT * FROM ChangeOrder WHERE Operator='{EscapeSql(operatorId.Trim())}' ORDER BY id DESC";
             IEnumerable<Form3Entity> orders = _database.Find(sql).Rows.Cast<DataRow>()
-                .Select(ToEntity)
-                .Where(item => !string.IsNullOrWhiteSpace(item.GDH));
+                .Select(ToEntity);
 
             if (!string.IsNullOrWhiteSpace(orderNoPrefix))
             {
@@ -52,9 +52,10 @@ namespace MesDatas.Services
 
         public bool SaveRecentOrder(string orderNo, string operatorId, int orderQuantity)
         {
-            if (string.IsNullOrWhiteSpace(orderNo) || string.IsNullOrWhiteSpace(operatorId)) return false;
+            // 允许工单号为空进行生产，操作员仍必填。
+            if (string.IsNullOrWhiteSpace(operatorId)) return false;
 
-            string normalizedOrderNo = orderNo.Trim();
+            string normalizedOrderNo = (orderNo ?? string.Empty).Trim();
             string escapedOperator = EscapeSql(operatorId.Trim());
             string escapedOrderNo = EscapeSql(normalizedOrderNo);
             DataTable rows = _database.Find(
@@ -66,8 +67,8 @@ namespace MesDatas.Services
             {
                 string existingOrderNo = row["OrderNo"].ToString().Trim();
                 int id;
-                if (string.IsNullOrWhiteSpace(existingOrderNo) ||
-                    string.Equals(existingOrderNo, normalizedOrderNo, StringComparison.OrdinalIgnoreCase) ||
+                // 空工单号同样按一条历史记录参与去重与保留。
+                if (string.Equals(existingOrderNo, normalizedOrderNo, StringComparison.OrdinalIgnoreCase) ||
                     !keptOrderNos.Add(existingOrderNo) ||
                     !int.TryParse(row["id"].ToString(), out id))
                 {
@@ -89,10 +90,11 @@ namespace MesDatas.Services
 
         public bool DeleteOrder(string orderNo, string operatorId, int orderQuantity)
         {
-            if (string.IsNullOrWhiteSpace(orderNo) || string.IsNullOrWhiteSpace(operatorId)) return false;
+            // 允许删除工单号为空的历史记录，操作员仍必填。
+            if (string.IsNullOrWhiteSpace(operatorId)) return false;
 
             string sql =
-                $"DELETE FROM ChangeOrder WHERE OrderNo='{EscapeSql(orderNo.Trim())}' " +
+                $"DELETE FROM ChangeOrder WHERE OrderNo='{EscapeSql((orderNo ?? string.Empty).Trim())}' " +
                 $"AND Operator='{EscapeSql(operatorId.Trim())}' AND OrderNum={orderQuantity}";
             return _database.Del(sql);
         }
